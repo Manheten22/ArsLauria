@@ -1,5 +1,6 @@
 package com.example.arslauria;
 
+import com.example.arslauria.item.ModItems;
 import com.example.arslauria.registry.ModRegistry;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.common.MinecraftForge;
@@ -23,6 +24,9 @@ public class Lauria
 
     public Lauria() {
         IEventBus modbus = FMLJavaModLoadingContext.get().getModEventBus();
+
+        ModItems.register(modbus);
+
         ModRegistry.registerRegistries(modbus);
         ArsNouveauRegistry.registerGlyphs();
         modbus.addListener(this::setup);
