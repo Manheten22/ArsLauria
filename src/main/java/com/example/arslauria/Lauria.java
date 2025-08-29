@@ -2,10 +2,12 @@ package com.example.arslauria;
 
 import com.example.arslauria.item.ModItems;
 import com.example.arslauria.registry.ModRegistry;
+import com.example.arslauria.setup.ModEffects;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
+import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -16,13 +18,14 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+
 // The value here should match an entry in the META-INF/mods.toml file
 @Mod(Lauria.MOD_ID)
 public class Lauria
 {
     public static final String MOD_ID = "arslauria";
 
-    private static final Logger LOGGER = LogManager.getLogger();
+    public static final Logger LOGGER = LogManager.getLogger();
     @SuppressWarnings("removal")
     public Lauria() {
         IEventBus modbus = FMLJavaModLoadingContext.get().getModEventBus();
@@ -35,6 +38,7 @@ public class Lauria
         modbus.addListener(this::doClientStuff);
         modbus.addListener(this::addCreative);
         MinecraftForge.EVENT_BUS.register(this);
+        ModEffects.register(modbus);
     }
 
     public static ResourceLocation prefix(String path){
@@ -50,11 +54,18 @@ public class Lauria
 
     }
 
+
     private void addCreative(BuildCreativeModeTabContentsEvent event) {
         if (event.getTabKey() == CreativeModeTabs.INGREDIENTS) {
             event.accept(ModItems.SAPPHIRE);
         }
     }
+    @SubscribeEvent
+    public void onRegisterCommands(RegisterCommandsEvent event) {
+        ModCommands.register(event.getDispatcher());
+        LOGGER.info("Registered custom /mana command");
+    }
+
 
     // You can use SubscribeEvent and let the Event Bus discover methods to call
     @SubscribeEvent

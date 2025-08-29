@@ -39,6 +39,7 @@ public class ModRegistry {
     }
 
     static SoundEvent makeSound(String name) {
-        return SoundEvent.createVariableRangeEvent(new ResourceLocation(MOD_ID, name));
+
+        return SoundEvent.createVariableRangeEvent(ResourceLocation.fromNamespaceAndPath(MOD_ID, name));
     }
 }

@@ -1,5 +1,6 @@
 package com.example.arslauria;
 
+import com.example.arslauria.glyphs.Barrier;
 import com.example.arslauria.glyphs.Blast;
 import com.example.arslauria.glyphs.TestEffect;
 import com.example.arslauria.registry.ModRegistry;
@@ -19,6 +20,7 @@ public class ArsNouveauRegistry {
     public static void registerGlyphs() {
         register(TestEffect.INSTANCE);
         register(Blast.INSTANCE);
+        register(Barrier.INSTANCE);
     }
     public static void registerSounds(){
         ModRegistry.EXAMPLE_SPELL_SOUND = SpellSoundRegistry.registerSpellSound(new SpellSound(ModRegistry.EXAMPLE_FAMILY.get(), Component.literal("Example")));

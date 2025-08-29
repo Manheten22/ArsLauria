@@ -73,7 +73,6 @@ public class Blast extends AbstractEffect implements IDamageEffect {
 
     private void createCustomExplosion(Level world, LivingEntity shooter, double x, double y, double z,
                                        float radius, double amp, float baseDmg, float ampScalar) {
-        // Используем ANExplosion для совместимости с существами Ars Nouveau
         ANExplosion explosion = new ANExplosion(world, shooter,
                 buildDamageSource(world, shooter),
                 null, x, y, z, radius, false,
