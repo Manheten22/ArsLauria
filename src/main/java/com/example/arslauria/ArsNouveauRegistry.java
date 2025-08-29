@@ -1,5 +1,6 @@
 package com.example.arslauria;
 
+import com.example.arslauria.glyphs.Blast;
 import com.example.arslauria.glyphs.TestEffect;
 import com.example.arslauria.registry.ModRegistry;
 import com.hollingsworth.arsnouveau.api.registry.GlyphRegistry;
@@ -15,8 +16,9 @@ public class ArsNouveauRegistry {
 
     public static List<AbstractSpellPart> registeredSpells = new ArrayList<>(); //this will come handy for datagen
 
-    public static void registerGlyphs(){
+    public static void registerGlyphs() {
         register(TestEffect.INSTANCE);
+        register(Blast.INSTANCE);
     }
     public static void registerSounds(){
         ModRegistry.EXAMPLE_SPELL_SOUND = SpellSoundRegistry.registerSpellSound(new SpellSound(ModRegistry.EXAMPLE_FAMILY.get(), Component.literal("Example")));

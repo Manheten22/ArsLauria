@@ -3,7 +3,9 @@ package com.example.arslauria;
 import com.example.arslauria.item.ModItems;
 import com.example.arslauria.registry.ModRegistry;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -21,7 +23,7 @@ public class Lauria
     public static final String MOD_ID = "arslauria";
 
     private static final Logger LOGGER = LogManager.getLogger();
-
+    @SuppressWarnings("removal")
     public Lauria() {
         IEventBus modbus = FMLJavaModLoadingContext.get().getModEventBus();
 
@@ -31,11 +33,12 @@ public class Lauria
         ArsNouveauRegistry.registerGlyphs();
         modbus.addListener(this::setup);
         modbus.addListener(this::doClientStuff);
+        modbus.addListener(this::addCreative);
         MinecraftForge.EVENT_BUS.register(this);
     }
 
     public static ResourceLocation prefix(String path){
-        return new ResourceLocation(MOD_ID, path);
+        return ResourceLocation.fromNamespaceAndPath(MOD_ID, path);
     }
 
     private void setup(final FMLCommonSetupEvent event)
@@ -45,6 +48,12 @@ public class Lauria
 
     private void doClientStuff(final FMLClientSetupEvent event) {
 
+    }
+
+    private void addCreative(BuildCreativeModeTabContentsEvent event) {
+        if (event.getTabKey() == CreativeModeTabs.INGREDIENTS) {
+            event.accept(ModItems.SAPPHIRE);
+        }
     }
 
     // You can use SubscribeEvent and let the Event Bus discover methods to call
