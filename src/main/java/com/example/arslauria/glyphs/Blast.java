@@ -125,6 +125,6 @@ public class Blast extends AbstractEffect implements IDamageEffect {
 
     @Override
     public SpellTier defaultTier() {
-        return SpellTier.TWO;
+        return SpellTier.THREE;
     }
 }

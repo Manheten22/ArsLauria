@@ -3,6 +3,7 @@ package com.example.arslauria;
 import com.example.arslauria.item.ModItems;
 import com.example.arslauria.registry.ModRegistry;
 import com.example.arslauria.setup.ModEffects;
+import com.hollingsworth.arsnouveau.setup.registry.CreativeTabRegistry;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraftforge.common.MinecraftForge;
@@ -37,6 +38,8 @@ public class Lauria
         modbus.addListener(this::setup);
         modbus.addListener(this::doClientStuff);
         modbus.addListener(this::addCreative);
+        modbus.addListener(this::doTabThings);
+
         MinecraftForge.EVENT_BUS.register(this);
         ModEffects.register(modbus);
     }
@@ -48,12 +51,20 @@ public class Lauria
     private void setup(final FMLCommonSetupEvent event)
     {
         ArsNouveauRegistry.registerSounds();
+
     }
 
     private void doClientStuff(final FMLClientSetupEvent event) {
 
     }
-
+    @SubscribeEvent
+    public void doTabThings(BuildCreativeModeTabContentsEvent event) {
+        if (event.getTab() == CreativeTabRegistry.BLOCKS.get()) {
+            for (var item : ModRegistry.ITEMS.getEntries()) {
+                event.accept(item::get);
+            }
+        }
+    }
 
     private void addCreative(BuildCreativeModeTabContentsEvent event) {
         if (event.getTabKey() == CreativeModeTabs.INGREDIENTS) {

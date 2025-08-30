@@ -1,5 +1,6 @@
 package com.example.arslauria.effects;
 
+import com.example.arslauria.setup.ModEffects;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
@@ -13,19 +14,25 @@ import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.living.MobEffectEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 
-import java.util.Map;
-import java.util.Set;
-import java.util.WeakHashMap;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Эффект «Barrier»:
- * – поглощает урон,
- * – удаляет данные при смерти или снятии эффекта,
- * – хранит носителей в DATA для рендера сферы.
+ * BarrierEffect — поддерживает стэки с демпфингом.
+ *
+ * Поведение:
+ * - стак считается сломанным (ломается звук) только когда оба его HP (magic и phys) дошли до 0 (isEmpty).
+ * - барьер полностью удаляется, когда суммарный magic <= 0 **ИЛИ** суммарный phys <= 0, или когда не осталось стэков.
+ * - absorb* НЕ вызывает removeEffect; он возвращает AbsorbResult, по которому onLivingHurt
+ *   воспроизводит звук(и) ломания стэков и при необходимости удаляет эффект/данные.
  */
 public class BarrierEffect extends MobEffect {
-    private static final Map<LivingEntity, BarrierData> DATA = new WeakHashMap<>();
+    private static final Map<LivingEntity, BarrierData> DATA = new ConcurrentHashMap<>();
+
+    private static final double STACK_WEAKEN = 0.8;
 
     public BarrierEffect() {
         super(MobEffectCategory.BENEFICIAL, 0x7F00FF);
@@ -56,38 +63,85 @@ public class BarrierEffect extends MobEffect {
     @SubscribeEvent
     public void onLivingHurt(LivingHurtEvent event) {
         LivingEntity target = event.getEntity();
-        if (!target.hasEffect(this)) return;
+        if (!target.hasEffect(ModEffects.BARRIER.get())) return;
 
         BarrierData data = DATA.get(target);
         if (data == null) return;
 
         DamageSource src    = event.getSource();
         float incoming       = event.getAmount();
-        float absorbed;
+        float totalAbsorbed  = 0f;
 
         boolean isMelee = src.getDirectEntity() instanceof LivingEntity
                 && !(src.getDirectEntity() instanceof Projectile);
 
+        // Поглощаем — absorb возвращает структуру с информацией сколько поглотили и сколько стэков сломалось.
+        BarrierData.AbsorbResult result;
         if (isMelee) {
-            absorbed      = Math.min(incoming, data.physHP);
-            data.physHP  -= absorbed;
+            result = data.absorbPhys(incoming);
         } else {
-            absorbed       = Math.min(incoming, data.magicHP);
-            data.magicHP  -= absorbed;
+            result = data.absorbMagic(incoming);
         }
 
-        event.setAmount(incoming - absorbed);
+        totalAbsorbed = result.absorbed;
+        event.setAmount(incoming - totalAbsorbed);
 
-        if (!data.broken && ((isMelee && data.physHP <= 0) || (!isMelee && data.magicHP <= 0))) {
-            target.level().playSound(
-                    null,
-                    target.getX(), target.getY(), target.getZ(),
-                    SoundEvents.GLASS_BREAK,
-                    SoundSource.BLOCKS,
-                    1.0F,
-                    1.0F
-            );
-            data.broken = true;
+        // Если сломались какие-то стэки — воспроизводим звук для каждого сломанного стакa (на сервере один раз)
+        if (result.stacksRemoved > 0 && !target.level().isClientSide) {
+            for (int i = 0; i < result.stacksRemoved; i++) {
+                target.level().playSound(
+                        null,
+                        target.getX(), target.getY(), target.getZ(),
+                        SoundEvents.GLASS_BREAK,
+                        SoundSource.BLOCKS,
+                        1.0F,
+                        1.0F
+                );
+            }
+        }
+
+        // Проверяем состояние барьера: удаляем эффект и данные только здесь (один раз),
+        // когда выполнено условие удаления: суммарный magic <= 0 || суммарный phys <= 0 || нет стэков.
+        boolean shouldRemove = false;
+        synchronized (data) {
+            if (data.isEmpty()) {
+                shouldRemove = true;
+            } else if (data.getTotalMagic() <= 0 || data.getTotalPhys() <= 0) {
+                shouldRemove = true;
+            }
+        }
+
+        if (shouldRemove) {
+            // Дополнительно проигрываем один финальный звук (как и раньше) — на случай полного разрушения.
+            if (!target.level().isClientSide) {
+                target.level().playSound(
+                        null,
+                        target.getX(), target.getY(), target.getZ(),
+                        SoundEvents.GLASS_BREAK,
+                        SoundSource.BLOCKS,
+                        1.0F,
+                        1.0F
+                );
+            }
+
+            target.removeEffect(ModEffects.BARRIER.get());
+            DATA.remove(target);
+
+            if (target instanceof ServerPlayer sp) {
+                sp.sendSystemMessage(Component.literal("Barrier broken."));
+            }
+            return;
+        } else {
+            // Если просто изменились пуулы/стэки — отправляем debug-сообщение о новых значениях
+            if (target instanceof ServerPlayer sp) {
+                BarrierData d = data;
+                sp.sendSystemMessage(Component.literal(String.format(
+                        "Barrier changed — magic: %d/%d, phys: %d/%d (stacks: %d)",
+                        d.getTotalMagic(), d.getTotalMagicMax(),
+                        d.getTotalPhys(), d.getTotalPhysMax(),
+                        d.getStacksCount()
+                )));
+            }
         }
     }
 
@@ -98,27 +152,167 @@ public class BarrierEffect extends MobEffect {
 
     @SubscribeEvent
     public void onEffectRemoved(MobEffectEvent.Remove event) {
-        if (event.getEffectInstance().getEffect() == this) {
+        // Защита от случая, когда getEffectInstance() возвращает null
+        if (event.getEffectInstance() == null) return;
+
+        if (event.getEffectInstance().getEffect() == ModEffects.BARRIER.get()) {
             DATA.remove(event.getEntity());
         }
     }
 
-    /** Вызывается из глифа для установки пулов HP */
-    public static void createBarrierData(LivingEntity entity, int magicHP, int physHP) {
-        DATA.put(entity, new BarrierData(magicHP, physHP));
+    /**
+     * Добавляет новый стэк барьера к цели.
+     * @param entity цель
+     * @param magicHP базовый magic HP
+     * @param physHP  базовый phys HP
+     * @param alreadyHadEffect true если на сущности *уже был* эффект ДО применения (если false — reset)
+     */
+    public static void addBarrierStack(LivingEntity entity, int magicHP, int physHP, boolean alreadyHadEffect) {
+        if (!alreadyHadEffect) {
+            BarrierData data = new BarrierData();
+            data.addStack(magicHP, physHP);
+            DATA.put(entity, data);
+        } else {
+            BarrierData data = DATA.computeIfAbsent(entity, k -> new BarrierData());
+            data.addStack(magicHP, physHP);
+        }
+
+        BarrierData current = DATA.get(entity);
+        if (entity instanceof ServerPlayer sp && current != null) {
+            String msg = String.format("Barrier applied — magic: %d/%d, phys: %d/%d (stacks: %d)",
+                    current.getTotalMagic(), current.getTotalMagicMax(),
+                    current.getTotalPhys(), current.getTotalPhysMax(),
+                    current.getStacksCount());
+            sp.sendSystemMessage(Component.literal(msg));
+        }
     }
 
-    /** Для рендерера: все сущности с активным барьером */
+    // backward-compatible overload
+    public static void addBarrierStack(LivingEntity entity, int magicHP, int physHP) {
+        addBarrierStack(entity, magicHP, physHP, entity.getEffect(ModEffects.BARRIER.get()) != null);
+    }
+
     public static Set<LivingEntity> getEntities() {
         return DATA.keySet();
     }
 
+    /* ======= внутренние классы / логика поглощения ======= */
+
     private static class BarrierData {
-        int magicHP, physHP;
-        boolean broken = false;
-        BarrierData(int magicHP, int physHP) {
-            this.magicHP = magicHP;
-            this.physHP  = physHP;
+        private final List<StackData> stacks = new ArrayList<>();
+
+        synchronized void addStack(int baseMagic, int basePhys) {
+            int existing = stacks.size();
+            double multiplier = Math.pow(STACK_WEAKEN, existing);
+            int mMax = (int) Math.ceil(baseMagic * multiplier);
+            int pMax = (int) Math.ceil(basePhys * multiplier);
+            if (mMax <= 0) mMax = 1;
+            if (pMax <= 0) pMax = 1;
+            stacks.add(new StackData(mMax, pMax));
+        }
+
+        /**
+         * Результат поглощения: сколько поглощено и сколько стэков удалено (сломано).
+         */
+        static class AbsorbResult {
+            final float absorbed;
+            final int stacksRemoved;
+
+            AbsorbResult(float absorbed, int stacksRemoved) {
+                this.absorbed = absorbed;
+                this.stacksRemoved = stacksRemoved;
+            }
+        }
+
+        /**
+         * Поглощение магического урона.
+         * Удаляет стэки, которые полностью опустели (magic<=0 && phys<=0).
+         * НЕ удаляет эффект напрямую.
+         */
+        synchronized AbsorbResult absorbMagic(float amount) {
+            float remaining = amount;
+            int removed = 0;
+
+            Iterator<StackData> it = stacks.iterator();
+            while (it.hasNext() && remaining > 0f) {
+                StackData s = it.next();
+                float absorbed = Math.min(remaining, s.magicHP);
+                s.magicHP -= absorbed;
+                remaining -= absorbed;
+
+                // если стак полностью пуст — удаляем его и подсчитываем, что сломался
+                if (s.isEmpty()) {
+                    it.remove();
+                    removed++;
+                }
+            }
+
+            float totalAbsorbed = amount - remaining;
+            return new AbsorbResult(totalAbsorbed, removed);
+        }
+
+        synchronized AbsorbResult absorbPhys(float amount) {
+            float remaining = amount;
+            int removed = 0;
+
+            Iterator<StackData> it = stacks.iterator();
+            while (it.hasNext() && remaining > 0f) {
+                StackData s = it.next();
+                float absorbed = Math.min(remaining, s.physHP);
+                s.physHP -= absorbed;
+                remaining -= absorbed;
+
+                if (s.isEmpty()) {
+                    it.remove();
+                    removed++;
+                }
+            }
+
+            float totalAbsorbed = amount - remaining;
+            return new AbsorbResult(totalAbsorbed, removed);
+        }
+
+        synchronized int getTotalMagic() {
+            return stacks.stream().mapToInt(s -> Math.max(0, s.magicHP)).sum();
+        }
+
+        synchronized int getTotalPhys() {
+            return stacks.stream().mapToInt(s -> Math.max(0, s.physHP)).sum();
+        }
+
+        synchronized int getTotalMagicMax() {
+            return stacks.stream().mapToInt(s -> s.magicMax).sum();
+        }
+
+        synchronized int getTotalPhysMax() {
+            return stacks.stream().mapToInt(s -> s.physMax).sum();
+        }
+
+        synchronized boolean isEmpty() {
+            return stacks.isEmpty();
+        }
+
+        synchronized int getStacksCount() {
+            return stacks.size();
+        }
+    }
+
+    private static class StackData {
+        int magicHP;
+        int physHP;
+        final int magicMax;
+        final int physMax;
+
+        StackData(int magicMax, int physMax) {
+            this.magicMax = magicMax;
+            this.physMax  = physMax;
+            this.magicHP  = magicMax;
+            this.physHP   = physMax;
+        }
+
+        // стак считается сломанным только когда оба HP дошли до нуля
+        boolean isEmpty() {
+            return magicHP <= 0 && physHP <= 0;
         }
     }
 }

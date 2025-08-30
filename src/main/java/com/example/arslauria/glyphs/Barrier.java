@@ -8,6 +8,9 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.HitResult;
+import net.minecraftforge.common.ForgeConfigSpec;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nonnull;
 import java.util.Set;
@@ -19,16 +22,12 @@ public class Barrier extends AbstractEffect {
     public static final Barrier INSTANCE =
             new Barrier(prefix("glyph_barrier"), "Barrier");
 
-    private static final int BASE_DURATION = 10 * 20; // 10 секунд
+    public static final int BASE_DURATION = 10 * 20; // 10 секунд
 
-    private Barrier(ResourceLocation tag, String description) {
+    public Barrier(ResourceLocation tag, String description) {
         super(tag, description);
     }
 
-    @Override
-    public int getDefaultManaCost() {
-        return 80;
-    }
 
     @Override
     public void onResolve(HitResult trace,
@@ -49,38 +48,63 @@ public class Barrier extends AbstractEffect {
                 && eHit.getEntity() instanceof LivingEntity hitEntity) {
             target = hitEntity;         // попали по другой сущности
         } else {
-            // Self-каст: только если вы регистрируете глиф как SpellType.SELF
-            // и хотите применять к себе, иначе выходим.
-            // Для TRACE-глифа можно отменять эффект при блоках:
+            // Self-каст: если глиф не поддерживает self — просто выход
             return;
         }
 
-        // 2. Не даём перекрывать существующий барьер
-        if (target.hasEffect(ModEffects.BARRIER.get())) {
-            return;
-        }
-
-        // 3. Вычисляем пулы HP
+// 2. Вычисляем пулы HP
         int amp     = (int) stats.getAmpMultiplier();
         int magicHP = 100 + amp * 20;
         int physHP  =  30 + amp *  5;
 
-        // 4. Создаём и вешаем эффект
-        MobEffectInstance inst = new MobEffectInstance(
-                ModEffects.BARRIER.get(),
-                BASE_DURATION,
-                0,     // уровень эффекта (unused)
-                false, // ambient
-                false   // видимые частицы
-        );
-        target.addEffect(inst);
+// --- СОХРАНЯЕМ, БЫЛ ЛИ ЭФФЕКТ ДО ПРИМЕНЕНИЯ (важно) ---
+        boolean hadEffect = target.hasEffect(ModEffects.BARRIER.get());
 
-        // 5. Инициализируем резервы в BarrierEffect
-        BarrierEffect.createBarrierData(target, magicHP, physHP);
+// 3. Если эффект не висит — повесим его (чтобы был видимый статус),
+//    иначе просто продлим / оставим
+        if (!hadEffect) {
+            MobEffectInstance inst = new MobEffectInstance(
+                    ModEffects.BARRIER.get(),
+                    BASE_DURATION,
+                    0,
+                    false,
+                    false
+            );
+            target.addEffect(inst);
+        } else {
+            MobEffectInstance cur = target.getEffect(ModEffects.BARRIER.get());
+            if (cur != null) {
+                MobEffectInstance refreshed = new MobEffectInstance(
+                        ModEffects.BARRIER.get(),
+                        Math.max(cur.getDuration(), BASE_DURATION),
+                        cur.getAmplifier(),
+                        cur.isAmbient(),
+                        cur.isVisible()
+                );
+                target.addEffect(refreshed);
+            }
+        }
+
+// 4. Добавляем стэк в BarrierEffect — передаём hadEffect (если эффекта не было, нужно сделать reset)
+        BarrierEffect.addBarrierStack(target, magicHP, physHP, hadEffect);
+
     }
 
+    @Override
+    protected int getDefaultManaCost() {
+        return 80;
+    }
+    @Override
+    public SpellTier defaultTier() {
+        return SpellTier.THREE;
+    }
 
-    @Nonnull
+    @Override
+    public void buildConfig(ForgeConfigSpec.Builder builder) {
+        super.buildConfig(builder);
+    }
+
+    @NotNull
     @Override
     public Set<com.hollingsworth.arsnouveau.api.spell.AbstractAugment> getCompatibleAugments() {
         return augmentSetOf(
@@ -89,16 +113,11 @@ public class Barrier extends AbstractEffect {
     }
 
     @Override
-    public SpellTier defaultTier() {
-        return SpellTier.THREE;
-    }
-
-    @Override
     public String getBookDescription() {
-        return "Creates a protective barrier capable of absorbing damage.";
+        return "Creates a protective barrier capable of absorbing damage (stacks, diminishing returns).";
     }
 
-    @Nonnull
+    @NotNull
     @Override
     public Set<SpellSchool> getSchools() {
         return setOf(SpellSchools.MANIPULATION);
