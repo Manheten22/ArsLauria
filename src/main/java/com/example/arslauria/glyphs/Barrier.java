@@ -2,11 +2,7 @@ package com.example.arslauria.glyphs;
 
 import com.example.arslauria.effects.BarrierEffect;
 import com.example.arslauria.setup.ModEffects;
-import com.hollingsworth.arsnouveau.api.spell.AbstractEffect;
-import com.hollingsworth.arsnouveau.api.spell.SpellContext;
-import com.hollingsworth.arsnouveau.api.spell.SpellResolver;
-import com.hollingsworth.arsnouveau.api.spell.SpellStats;
-import com.hollingsworth.arsnouveau.api.spell.SpellTier;
+import com.hollingsworth.arsnouveau.api.spell.*;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.LivingEntity;
@@ -75,7 +71,7 @@ public class Barrier extends AbstractEffect {
                 BASE_DURATION,
                 0,     // уровень эффекта (unused)
                 false, // ambient
-                true   // видимые частицы
+                false   // видимые частицы
         );
         target.addEffect(inst);
 
@@ -95,5 +91,16 @@ public class Barrier extends AbstractEffect {
     @Override
     public SpellTier defaultTier() {
         return SpellTier.ONE;
+    }
+
+    @Override
+    public String getBookDescription() {
+        return "Creates a protective barrier capable of absorbing damage.";
+    }
+
+    @Nonnull
+    @Override
+    public Set<SpellSchool> getSchools() {
+        return setOf(SpellSchools.MANIPULATION);
     }
 }

@@ -34,9 +34,13 @@ public class BarrierDomeRenderer {
     // Уменьшены для «сетки» примерно 3×3 без больших пустот
     private static final float V_STEP   = 45;  // φ: 0°→180°
     private static final float H_STEP   = 45    ;  // θ: 0°→360°
+    private static volatile boolean RENDER_ENABLED = false;
+    public static void setRenderEnabled(boolean enabled) { RENDER_ENABLED = enabled; }
+    public static boolean isRenderEnabled() { return RENDER_ENABLED; };
 
     @SubscribeEvent
     public static void onRenderLevelStage(RenderLevelStageEvent event) {
+        if (!RENDER_ENABLED) return;
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_ENTITIES) return;
 
         Minecraft mc = Minecraft.getInstance();
