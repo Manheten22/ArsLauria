@@ -1,7 +1,12 @@
 {
 	"arslauria.glyph_desc.glyph_test": "This is my test!",
 	"arslauria.glyph_name.glyph_test": "Test",
-	"item.an_addon.star_hat": "Example hat",
+
+	"item.arslauria.star_hat": "Example hat",
+
     "arslauria.glyph_name.glyph_blast": "Blast",
-    "arslauria.glyph_name.glyph_barrier": "Barrier"
+   "arslauria.glyph_desc.glyph_blast": "This is my test!",
+
+    "arslauria.glyph_name.glyph_barrier": "Barrier",
+    "arslauria.glyph_desc.glyph_barrier": "Creates a protective barrier capable of absorbing damage."
 }

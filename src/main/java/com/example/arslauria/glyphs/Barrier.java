@@ -90,7 +90,7 @@ public class Barrier extends AbstractEffect {
 
     @Override
     public SpellTier defaultTier() {
-        return SpellTier.ONE;
+        return SpellTier.THREE;
     }
 
     @Override
