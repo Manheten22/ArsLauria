@@ -1,10 +1,8 @@
-// File: src/main/java/com/example/arslauria/client/BarrierDomeRenderer.java
 package com.example.arslauria.client;
 
 import com.example.arslauria.Lauria;
-import com.example.arslauria.effects.BarrierEffect;
+import com.example.arslauria.setup.ModEffects;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
@@ -18,9 +16,12 @@ import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+import java.util.HashSet;
+import java.util.Set;
+
 /**
- * Рендер полной полупрозрачной сферы из стеклянных «блоков»
- * вокруг каждой сущности с активным барьером.
+ * Hollow cube renderer implemented by drawing six thin slabs (faces) using renderSingleBlock.
+ * This approach avoids low-level vertex/matrix mismatches and is compatible with block rendering pipeline.
  */
 @Mod.EventBusSubscriber(
         modid = Lauria.MOD_ID,
@@ -28,15 +29,21 @@ import net.minecraftforge.fml.common.Mod;
         bus   = Mod.EventBusSubscriber.Bus.FORGE
 )
 public class BarrierDomeRenderer {
-    // Радиус сферы
-    private static final float RADIUS   = 1.5f;
-    // Шаг углов: V_STEP по вертикали (φ), H_STEP по горизонтали (θ)
-    // Уменьшены для «сетки» примерно 3×3 без больших пустот
-    private static final float V_STEP   = 45;  // φ: 0°→180°
-    private static final float H_STEP   = 45    ;  // θ: 0°→360°
-    private static volatile boolean RENDER_ENABLED = false;
+    private static volatile boolean RENDER_ENABLED = true;
     public static void setRenderEnabled(boolean enabled) { RENDER_ENABLED = enabled; }
     public static boolean isRenderEnabled() { return RENDER_ENABLED; };
+
+    // ---------- ПАРАМЕТРЫ ----------
+    private static final boolean UNIFORM_CUBE = true;
+    private static final float SCALE_MULTIPLIER = 1.3f;
+    private static final float ADD_PADDING = 0.0f;
+    private static final float OFFSET_Y = 0.0f;
+    private static final float MIN_DIM = 0.3f;
+    private static final float MAX_DIM = 6.0f;
+    private static final double MAX_RENDER_DISTANCE = 64.0;
+    // Толщина граней в unit-cube (0..1). 0.02 ≈ 1/50 блока — тонкая грань.
+    private static final float THICKNESS = 0.02f;
+    // --------------------------------
 
     @SubscribeEvent
     public static void onRenderLevelStage(RenderLevelStageEvent event) {
@@ -44,76 +51,154 @@ public class BarrierDomeRenderer {
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_ENTITIES) return;
 
         Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null) return;
+        if (mc.level == null || mc.player == null) return;
 
         PoseStack ms = event.getPoseStack();
         MultiBufferSource.BufferSource buf = mc.renderBuffers().bufferSource();
 
-        // смещаем в камеру
         double camX = mc.gameRenderer.getMainCamera().getPosition().x;
         double camY = mc.gameRenderer.getMainCamera().getPosition().y;
         double camZ = mc.gameRenderer.getMainCamera().getPosition().z;
         ms.pushPose();
         ms.translate(-camX, -camY, -camZ);
 
-        // проход по всем сущностям с активным барьер-эффектом
-        for (LivingEntity entity : BarrierEffect.getEntities()) {
-            double ex = interpolate(entity.xOld, entity.getX(), event.getPartialTick());
-            double ey = interpolate(entity.yOld, entity.getY(), event.getPartialTick())
-                    + entity.getBbHeight() / 2.0;  // центр по высоте
-            double ez = interpolate(entity.zOld, entity.getZ(), event.getPartialTick());
+        double maxDistSq = MAX_RENDER_DISTANCE * MAX_RENDER_DISTANCE;
+        Set<Integer> renderedIds = new HashSet<>();
 
-            ms.pushPose();
-            ms.translate(ex, ey, ez);
+        // --- 1) Обычный перебор сущностей рядом ---
+        for (LivingEntity entity : mc.level.getEntitiesOfClass(LivingEntity.class, mc.player.getBoundingBox().inflate(MAX_RENDER_DISTANCE))) {
+            if (entity == null) continue;
+            if (!entity.isAlive()) continue;
 
-            // φ от 0° (северный полюс) до 180° (южный полюс)
-            for (float φ = 0; φ <= 180; φ += V_STEP) {
-                double radφ = Math.toRadians(φ);
-                double sinφ = Math.sin(radφ);    // радиус кольца
-                double cosφ = Math.cos(radφ);    // высота Y
+            boolean hasEffect = entity.hasEffect(ModEffects.BARRIER.get());
+            boolean inClientMap = ClientBarrierData.contains(entity.getId());
 
-                for (float θ = 0; θ < 360; θ += H_STEP) {
-                    double radθ = Math.toRadians(θ);
-                    float x = (float)(sinφ * Math.cos(radθ) * RADIUS);
-                    float y = (float)(cosφ * RADIUS);
-                    float z = (float)(sinφ * Math.sin(radθ) * RADIUS);
-                    renderCenteredGlass(ms, buf, x, y, z);
-                }
-            }
+            if (!hasEffect && !inClientMap) continue;
 
-            ms.popPose();
+            double dx = entity.getX() - camX;
+            double dy = (entity.getY() + entity.getBbHeight() * 0.5) - camY;
+            double dz = entity.getZ() - camZ;
+            if (dx*dx + dy*dy + dz*dz > maxDistSq) continue;
+
+            renderHollowForEntity(entity, ms, buf, event.getPartialTick());
+            renderedIds.add(entity.getId());
+        }
+
+        // --- 2) Fallback: рендер по ClientBarrierData (если есть id'ы, которых не встретили) ---
+        for (Integer id : ClientBarrierData.getEntities()) {
+            if (renderedIds.contains(id)) continue; // уже отрендерено
+
+            var maybeEntity = mc.level.getEntity(id);
+            if (!(maybeEntity instanceof LivingEntity)) continue;
+            LivingEntity entity = (LivingEntity) maybeEntity;
+
+            double dx = entity.getX() - camX;
+            double dy = (entity.getY() + entity.getBbHeight() * 0.5) - camY;
+            double dz = entity.getZ() - camZ;
+            if (dx*dx + dy*dy + dz*dz > maxDistSq) continue;
+
+            renderHollowForEntity(entity, ms, buf, event.getPartialTick());
+            renderedIds.add(entity.getId());
         }
 
         buf.endBatch(RenderType.translucent());
         ms.popPose();
     }
 
-    /**
-     * Рендерит один «блок» стекла так, чтобы он был центрирован по (x,y,z)
-     */
-    private static void renderCenteredGlass(
-            PoseStack ms,
-            MultiBufferSource buf,
-            float x, float y, float z
-    ) {
-        BlockState state = Blocks.GLASS.defaultBlockState();
+    private static void renderHollowForEntity(LivingEntity entity, PoseStack ms, MultiBufferSource.BufferSource buf, float partialTick) {
+        // интерполяция позиции и центр по высоте
+        double ex = interpolate(entity.xOld, entity.getX(), partialTick);
+        double eyFeet = interpolate(entity.yOld, entity.getY(), partialTick);
+        double eyCenter = eyFeet + entity.getBbHeight() / 2.0 + OFFSET_Y;
+        double ez = interpolate(entity.zOld, entity.getZ(), partialTick);
+
+        float baseW = (float) entity.getBbWidth();
+        float baseH = (float) entity.getBbHeight();
+
+        // размер куба (unit cube позже масштабируется)
+        float targetX, targetY, targetZ;
+        if (UNIFORM_CUBE) {
+            float base = Math.max(baseW, baseH);
+            float dim = base * SCALE_MULTIPLIER + ADD_PADDING;
+            dim = clamp(dim, MIN_DIM, MAX_DIM);
+            targetX = targetY = targetZ = dim;
+        } else {
+            targetX = clamp(baseW * SCALE_MULTIPLIER + ADD_PADDING, MIN_DIM, MAX_DIM);
+            targetZ = clamp(baseW * SCALE_MULTIPLIER + ADD_PADDING, MIN_DIM, MAX_DIM);
+            targetY = clamp(baseH * SCALE_MULTIPLIER + ADD_PADDING, MIN_DIM, MAX_DIM);
+        }
+
+        // нижний-левый-задний угол итогового куба
+        double minX = ex - targetX / 2.0;
+        double minY = eyCenter - targetY / 2.0;
+        double minZ = ez - targetZ / 2.0;
+
+        // По сути мы будем масштабировать unit-cube (0..1) в размер targetX/Y/Z,
+        // и внутри этого пространства рисовать шесть тонких плит (slabs).
         ms.pushPose();
-        // сдвигаем на −0.5 во всех осях, чтобы куб «блок» центрировался
-        ms.translate(x - 0.5f, y - 0.5f, z - 0.5f);
-        VertexConsumer vc = buf.getBuffer(RenderType.translucent());
-        Minecraft.getInstance()
-                .getBlockRenderer()
-                .renderSingleBlock(
-                        state,
-                        ms,
-                        buf,
-                        LightTexture.FULL_BRIGHT,
-                        OverlayTexture.NO_OVERLAY
-                );
+
+        // переносим в min
+        ms.translate(minX, minY, minZ);
+        // масштабируем unit-cube в target размеры
+        ms.scale(targetX, targetY, targetZ);
+
+        BlockState state = Blocks.WHITE_STAINED_GLASS.defaultBlockState();
+
+        // Толщина в локальных unit-координатах
+        float t = THICKNESS;
+
+        // FRONT (z = 0 .. t)
+        ms.pushPose();
+        ms.translate(0.0, 0.0, 0.0); // в unit coords
+        ms.scale(1.0f, 1.0f, t);
+        Minecraft.getInstance().getBlockRenderer().renderSingleBlock(state, ms, buf, LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+        ms.popPose();
+
+        // BACK (z = 1-t .. 1) -> translate z = 1 - t, scale z = t
+        ms.pushPose();
+        ms.translate(0.0, 0.0, 1.0 - t);
+        ms.scale(1.0f, 1.0f, t);
+        Minecraft.getInstance().getBlockRenderer().renderSingleBlock(state, ms, buf, LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+        ms.popPose();
+
+        // LEFT (x = 0 .. t)
+        ms.pushPose();
+        ms.translate(0.0, 0.0, 0.0);
+        ms.scale(t, 1.0f, 1.0f);
+        Minecraft.getInstance().getBlockRenderer().renderSingleBlock(state, ms, buf, LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+        ms.popPose();
+
+        // RIGHT (x = 1-t .. 1)
+        ms.pushPose();
+        ms.translate(1.0 - t, 0.0, 0.0);
+        ms.scale(t, 1.0f, 1.0f);
+        Minecraft.getInstance().getBlockRenderer().renderSingleBlock(state, ms, buf, LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+        ms.popPose();
+
+        // BOTTOM (y = 0 .. t)
+        ms.pushPose();
+        ms.translate(0.0, 0.0, 0.0);
+        ms.scale(1.0f, t, 1.0f);
+        Minecraft.getInstance().getBlockRenderer().renderSingleBlock(state, ms, buf, LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+        ms.popPose();
+
+        // TOP (y = 1-t .. 1)
+        ms.pushPose();
+        ms.translate(0.0, 1.0 - t, 0.0);
+        ms.scale(1.0f, t, 1.0f);
+        Minecraft.getInstance().getBlockRenderer().renderSingleBlock(state, ms, buf, LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+        ms.popPose();
+
         ms.popPose();
     }
 
     private static double interpolate(double prev, double now, float pt) {
         return prev + (now - prev) * pt;
+    }
+
+    private static float clamp(float v, float min, float max) {
+        if (v < min) return min;
+        if (v > max) return max;
+        return v;
     }
 }

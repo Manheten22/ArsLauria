@@ -1,7 +1,9 @@
 package com.example.arslauria;
 
-import com.example.arslauria.item.ModItems;
+//import com.example.arslauria.item.ModItems;
+import com.example.arslauria.network.NetworkHandler;
 import com.example.arslauria.registry.ModRegistry;
+//import com.example.arslauria.setup.ModEffects;
 import com.example.arslauria.setup.ModEffects;
 import com.hollingsworth.arsnouveau.setup.registry.CreativeTabRegistry;
 import net.minecraft.resources.ResourceLocation;
@@ -34,8 +36,6 @@ public class Lauria
         ModRegistry.registerRegistries(modbus);
 
         ArsNouveauRegistry.registerGlyphs();
-        ModItems.register(modbus);
-
         modbus.addListener(this::setup);
         modbus.addListener(this::doClientStuff);
         modbus.addListener(this::doTabThings);
@@ -51,6 +51,7 @@ public class Lauria
     private void setup(final FMLCommonSetupEvent event)
     {
         ArsNouveauRegistry.registerSounds();
+        NetworkHandler.init();
     }
 
     private void doClientStuff(final FMLClientSetupEvent event) {

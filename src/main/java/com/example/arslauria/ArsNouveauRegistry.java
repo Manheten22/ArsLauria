@@ -1,5 +1,6 @@
 package com.example.arslauria;
 
+//import com.example.arslauria.glyphs.Barrier;
 import com.example.arslauria.glyphs.Barrier;
 import com.example.arslauria.glyphs.Blast;
 import com.example.arslauria.glyphs.TestEffect;

@@ -18,7 +18,7 @@ public class ModEffects {
     public static final RegistryObject<MobEffect> BARRIER =
             EFFECTS.register("barrier", BarrierEffect::new);
 
-    /** Вызывается из конструктора Lauria для регистрации всех эффектов */
+    // Вызывается из конструктора Lauria для регистрации всех эффектов
     public static void register(IEventBus modEventBus) {
         EFFECTS.register(modEventBus);
     }

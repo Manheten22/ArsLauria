@@ -39,4 +39,8 @@ public class TestEffect extends AbstractEffect {
     public Set<AbstractAugment> getCompatibleAugments() {
         return augmentSetOf(AugmentAmplify.INSTANCE);
     }
+
+    public SpellTier defaultTier() {
+        return SpellTier.THREE;
+    }
 }

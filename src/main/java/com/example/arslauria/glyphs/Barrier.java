@@ -92,7 +92,7 @@ public class Barrier extends AbstractEffect {
 
     @Override
     protected int getDefaultManaCost() {
-        return 0;
+        return 250;
     }
     @Override
     public SpellTier defaultTier() {

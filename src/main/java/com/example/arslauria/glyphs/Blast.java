@@ -31,7 +31,7 @@ public class Blast extends AbstractEffect implements IDamageEffect {
 
     @Override
     public int getDefaultManaCost() {
-        return 50;
+        return 200;
     }
 
     @Override
@@ -125,6 +125,6 @@ public class Blast extends AbstractEffect implements IDamageEffect {
 
     @Override
     public SpellTier defaultTier() {
-        return SpellTier.THREE;
+        return SpellTier.TWO;
     }
 }

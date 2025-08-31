@@ -1,6 +1,6 @@
 {
   "parent": "minecraft:item/generated",
   "textures": {
-    "layer0": "arslauria:item/_glyph_template_augment"
+    "layer0": "arslauria:item/glyph_barrier"
   }
 }

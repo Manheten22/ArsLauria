@@ -10,9 +10,9 @@ import net.minecraftforge.event.TickEvent.PlayerTickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
-/**
- * Клиентский подписчик для отрисовки ауры
- */
+
+ // Клиентский подписчик для отрисовки ауры
+
 @Mod.EventBusSubscriber(
         modid = com.example.arslauria.Lauria.MOD_ID,
         value = Dist.CLIENT,
@@ -31,24 +31,24 @@ public class Aura {
             event.player.getCapability(ModCommands.MANA_CAP)
                     .resolve()
                     .ifPresent(cap -> spawnAura(event.player.getX(),
-                            event.player.getY() + event.player.getEyeHeight() - 0.5,
+                            event.player.getY() + event.player.getEyeHeight() - 1.3,
                             event.player.getZ(),
                             cap.getMaxMana()));
         }
     }
 
-    /** Вычисляем радиус ауры по максимальной мане */
+    // Вычисляем радиус ауры по максимальной мане
     private static float computeRadius(double maxMana) {
         if (maxMana < 1000) {
-            return 1.5f;   // малая аура
+            return 1f;   // малая аура
         } else if (maxMana < 1500) {
-            return 3.0f;   // средняя аура
+            return 2.0f;   // средняя аура
         } else {
-            return 5.0f;   // большая аура
+            return 3.0f;   // большая аура
         }
     }
 
-    /** Спавнит часть частиц по окружности вокруг (x,y,z) */
+    // Спавнит часть частиц по окружности вокруг (x,y,z)
     private static void spawnAura(double x, double y, double z, double maxMana) {
         float radius = computeRadius(maxMana);
         int points = 20;              // кол-во точек окружности

@@ -1,38 +1,47 @@
 package com.example.arslauria.effects;
 
+import com.example.arslauria.network.BarrierSyncPacket;
+import com.example.arslauria.network.NetworkHandler;
 import com.example.arslauria.setup.ModEffects;
 import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectCategory;
+import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.projectile.Projectile;
-import net.minecraft.world.damagesource.DamageSource;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.living.MobEffectEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraft.network.chat.Component;
-import net.minecraft.server.level.ServerPlayer;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * BarrierEffect — поддерживает стэки с демпфингом.
+ * BarrierEffect — поддерживает стэки с демпфингом и синхронизирует отображение на клиентах.
  *
  * Поведение:
  * - стак считается сломанным (ломается звук) только когда оба его HP (magic и phys) дошли до 0 (isEmpty).
- * - барьер полностью удаляется, когда суммарный magic <= 0 **ИЛИ** суммарный phys <= 0, или когда не осталось стэков.
- * - absorb* НЕ вызывает removeEffect; он возвращает AbsorbResult, по которому onLivingHurt
- *   воспроизводит звук(и) ломания стэков и при необходимости удаляет эффект/данные.
+ * - барьер полностью удаляется, когда суммарный magic <= 0 || суммарный phys <= 0 || нет стэков.
+ * - absorb* НЕ вызывает removeEffect напрямую; onLivingHurt воспроизводит звук(и) ломания стэков и при необходимости удаляет эффект/данные.
+ *
+ * Сетевые отправки делаются через NetworkHandler. NetworkHandler.init() должен быть вызван в фазе common-setup вашего мода.
  */
 public class BarrierEffect extends MobEffect {
     private static final Map<LivingEntity, BarrierData> DATA = new ConcurrentHashMap<>();
 
     private static final double STACK_WEAKEN = 0.8;
+
+    // диапазон для fallback-рассылки (если нужно) — в блоках
+    private static final double SYNC_RANGE = 64.0;
+    private static final double SYNC_RANGE_SQ = SYNC_RANGE * SYNC_RANGE;
 
     public BarrierEffect() {
         super(MobEffectCategory.BENEFICIAL, 0x7F00FF);
@@ -41,6 +50,7 @@ public class BarrierEffect extends MobEffect {
 
     @Override
     public void applyEffectTick(LivingEntity entity, int amplifier) {
+        // Клиентские частицы (вызов происходит и на клиенте)
         if (entity.level().isClientSide) {
             double x = entity.getX();
             double y = entity.getY() + entity.getBbHeight() * 0.5;
@@ -70,12 +80,10 @@ public class BarrierEffect extends MobEffect {
 
         DamageSource src    = event.getSource();
         float incoming       = event.getAmount();
-        float totalAbsorbed  = 0f;
 
         boolean isMelee = src.getDirectEntity() instanceof LivingEntity
                 && !(src.getDirectEntity() instanceof Projectile);
 
-        // Поглощаем — absorb возвращает структуру с информацией сколько поглотили и сколько стэков сломалось.
         BarrierData.AbsorbResult result;
         if (isMelee) {
             result = data.absorbPhys(incoming);
@@ -83,7 +91,7 @@ public class BarrierEffect extends MobEffect {
             result = data.absorbMagic(incoming);
         }
 
-        totalAbsorbed = result.absorbed;
+        float totalAbsorbed = result.absorbed;
         event.setAmount(incoming - totalAbsorbed);
 
         // Если сломались какие-то стэки — воспроизводим звук для каждого сломанного стакa (на сервере один раз)
@@ -112,7 +120,7 @@ public class BarrierEffect extends MobEffect {
         }
 
         if (shouldRemove) {
-            // Дополнительно проигрываем один финальный звук (как и раньше) — на случай полного разрушения.
+            // финальный звук (сервер)
             if (!target.level().isClientSide) {
                 target.level().playSound(
                         null,
@@ -124,15 +132,21 @@ public class BarrierEffect extends MobEffect {
                 );
             }
 
+            // удаляем эффект и данные (серверная сторона)
             target.removeEffect(ModEffects.BARRIER.get());
             DATA.remove(target);
+
+            // синхронизируем удаление на клиенты
+            if (!target.level().isClientSide) {
+                sendSyncRemoval(target);
+            }
 
             if (target instanceof ServerPlayer sp) {
                 sp.sendSystemMessage(Component.literal("Barrier broken."));
             }
             return;
         } else {
-            // Если просто изменились пуулы/стэки — отправляем debug-сообщение о новых значениях
+            // Если просто изменились пуулы/стэки — отправляем debug-сообщение о новых значениях серверному игроку
             if (target instanceof ServerPlayer sp) {
                 BarrierData d = data;
                 sp.sendSystemMessage(Component.literal(String.format(
@@ -147,7 +161,10 @@ public class BarrierEffect extends MobEffect {
 
     @SubscribeEvent
     public void onEntityDeath(LivingDeathEvent event) {
-        DATA.remove(event.getEntity());
+        LivingEntity entity = event.getEntity();
+        if (DATA.remove(entity) != null) {
+            if (!entity.level().isClientSide) sendSyncRemoval(entity);
+        }
     }
 
     @SubscribeEvent
@@ -156,7 +173,10 @@ public class BarrierEffect extends MobEffect {
         if (event.getEffectInstance() == null) return;
 
         if (event.getEffectInstance().getEffect() == ModEffects.BARRIER.get()) {
-            DATA.remove(event.getEntity());
+            LivingEntity entity = (LivingEntity) event.getEntity();
+            if (DATA.remove(entity) != null) {
+                if (!entity.level().isClientSide) sendSyncRemoval(entity);
+            }
         }
     }
 
@@ -175,6 +195,11 @@ public class BarrierEffect extends MobEffect {
         } else {
             BarrierData data = DATA.computeIfAbsent(entity, k -> new BarrierData());
             data.addStack(magicHP, physHP);
+        }
+
+        // синхронизируем на клиентов — добавление / обновление
+        if (!entity.level().isClientSide) {
+            sendSyncAdd(entity);
         }
 
         BarrierData current = DATA.get(entity);
@@ -313,6 +338,52 @@ public class BarrierEffect extends MobEffect {
         // стак считается сломанным только когда оба HP дошли до нуля
         boolean isEmpty() {
             return magicHP <= 0 && physHP <= 0;
+        }
+    }
+
+    /* ======= сетевые хелперы для синхронизации с клиентом ======= */
+
+    private static void sendSyncAdd(LivingEntity entity) {
+        if (entity.level().isClientSide) return;
+        try {
+            int duration = 0;
+            var inst = entity.getEffect(ModEffects.BARRIER.get());
+            if (inst != null) duration = inst.getDuration(); // тики
+
+            if (NetworkHandler.isInitialized()) {
+                NetworkHandler.sendToTracking(entity, new com.example.arslauria.network.BarrierSyncPacket(entity.getId(), true, duration));
+                return;
+            }
+
+            // fallback (если канал не инициализирован) — разослать всем игрокам рядом
+            if (entity.level() instanceof ServerLevel serverLevel) {
+                for (ServerPlayer p : serverLevel.players()) {
+                    if (p.distanceToSqr(entity) <= SYNC_RANGE_SQ) {
+                        NetworkHandler.sendToPlayer(p, new com.example.arslauria.network.BarrierSyncPacket(entity.getId(), true, duration));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static void sendSyncRemoval(LivingEntity entity) {
+        if (entity.level().isClientSide) return;
+        try {
+            if (NetworkHandler.isInitialized()) {
+                NetworkHandler.sendToTracking(entity, new com.example.arslauria.network.BarrierSyncPacket(entity.getId(), false, 0));
+                return;
+            }
+            if (entity.level() instanceof ServerLevel serverLevel) {
+                for (ServerPlayer p : serverLevel.players()) {
+                    if (p.distanceToSqr(entity) <= SYNC_RANGE_SQ) {
+                        NetworkHandler.sendToPlayer(p, new com.example.arslauria.network.BarrierSyncPacket(entity.getId(), false, 0));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 }
