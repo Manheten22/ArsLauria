@@ -1,0 +1,61 @@
+{
+  "type": "ars_nouveau:glyph",
+  "count": 1,
+  "exp": 315,
+  "inputItems": [
+    {
+      "item": {
+        "item": "minecraft:tinted_glass"
+      }
+    },
+
+    {
+      "item": {
+        "item": "minecraft:tinted_glass"
+      }
+    },
+
+    {
+      "item": {
+        "item": "minecraft:tinted_glass"
+      }
+    },
+
+    {
+      "item": {
+        "item": "minecraft:shield"
+      }
+    },
+
+    {
+      "item": {
+        "item": "minecraft:heart_of_the_sea"
+      }
+    },
+
+    {
+      "item": {
+        "item": "ars_nouveau:conjuration_essence"
+      }
+    },
+
+    {
+      "item": {
+        "item": "minecraft:tinted_glass"
+      }
+    },
+
+    {
+      "item": {
+        "item": "minecraft:tinted_glass"
+      }
+    },
+
+    {
+      "item": {
+        "item": "minecraft:tinted_glass"
+      }
+    }
+  ],
+  "output": "arslauria:glyph_barrier"
+}

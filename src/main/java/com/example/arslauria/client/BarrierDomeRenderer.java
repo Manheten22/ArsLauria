@@ -186,7 +186,7 @@ public class BarrierDomeRenderer {
             }
         }
 
-        BlockState state = Blocks.WHITE_STAINED_GLASS.defaultBlockState();
+        BlockState state = Blocks.TINTED_GLASS.defaultBlockState();
 
         // Толщина в локальных unit-координатах
         float t = THICKNESS;

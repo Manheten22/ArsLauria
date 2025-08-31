@@ -34,7 +34,7 @@ description='''
 Starbuncles will conquer the world
 '''
 # A dependency - use the . to indicate dependency for a specific modid. Dependencies are optional.
-[[dependencies.an_addon]] #optional
+[[dependencies.arslauria]] #optional
     # the modid of the dependency
     modId="forge" #mandatory
     # Does this dependency have to exist - if not, ordering below must be specified
@@ -46,21 +46,21 @@ Starbuncles will conquer the world
     # Side this dependency is applied on - BOTH, CLIENT or SERVER
     side="BOTH"
 # Here's another dependency
-[[dependencies.an_addon]]
+[[dependencies.arslauria]]
     modId="patchouli"
     mandatory=true
     versionRange="[1.18.1-61,)"
     ordering="AFTER"
     side="BOTH"
 
-[[dependencies.an_addon]]
+[[dependencies.arslauria]]
     modId="curios"
     mandatory=true
     versionRange="[1.18.1-5.0.3.0,)"
     ordering="AFTER"
     side="BOTH"
 
-[[dependencies.an_addon]]
+[[dependencies.arslauria]]
     modId="ars_nouveau"
     mandatory=true
     versionRange="[2.5.0,)"

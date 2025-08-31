@@ -4,9 +4,6 @@ import com.example.arslauria.Lauria;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.fml.LogicalSide;
 import net.minecraftforge.network.NetworkDirection;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.NetworkRegistry;
@@ -42,7 +39,6 @@ public final class NetworkHandler {
         }
 
         LOGGER.info("[NetworkHandler] init() called — registering channel & messages");
-
         CHANNEL = NetworkRegistry.newSimpleChannel(
                 new ResourceLocation(Lauria.MOD_ID, "main"),
                 () -> PROTOCOL_VERSION,

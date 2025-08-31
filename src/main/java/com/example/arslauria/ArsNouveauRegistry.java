@@ -22,11 +22,19 @@ public class ArsNouveauRegistry {
         register(TestEffect.INSTANCE);
         register(Blast.INSTANCE);
         register(Barrier.INSTANCE);
+
     }
     public static void registerSounds(){
     }
     public static void register(AbstractSpellPart spellPart){
         GlyphRegistry.registerSpell(spellPart);
         registeredSpells.add(spellPart);
+    }
+
+    public static void registerGlyphsForDatagen() {
+        registeredSpells.clear();
+        registeredSpells.add(TestEffect.INSTANCE);
+        registeredSpells.add(Blast.INSTANCE);
+        registeredSpells.add(Barrier.INSTANCE);
     }
 }

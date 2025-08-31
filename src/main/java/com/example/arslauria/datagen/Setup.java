@@ -9,16 +9,21 @@ import net.minecraftforge.fml.common.Mod;
 @Mod.EventBusSubscriber(modid = Lauria.MOD_ID, bus = Mod.EventBusSubscriber.Bus.MOD)
 public class Setup {
 
-    //use runData configuration to generate stuff, event.includeServer() for data, event.includeClient() for assets
     @SubscribeEvent
     public static void gatherData(GatherDataEvent event) {
         DataGenerator gen = event.getGenerator();
 
-        gen.addProvider(event.includeServer(), new ArsProviders.ImbuementProvider(gen));
-        gen.addProvider(event.includeServer(), new ArsProviders.GlyphProvider(gen));
-        gen.addProvider(event.includeServer(), new ArsProviders.EnchantingAppProvider(gen));
+        // SERVER data (recipes, loot, tags и т.д.)
+        if (event.includeServer()) {
+            gen.addProvider(true, new ArsProviders.GlyphProvider(gen));
+            gen.addProvider(true, new ArsProviders.EnchantingAppProvider(gen));
+            gen.addProvider(true, new ArsProviders.ImbuementProvider(gen)); // добавил — у тебя был провайдер, не регистрирован
+        }
 
-        gen.addProvider(event.includeServer(), new ArsProviders.PatchouliProvider(gen));
+        // CLIENT data (assets, локали, patchouli страницы и т.п.)
+        if (event.includeClient()) {
+            gen.addProvider(true, new ArsProviders.PatchouliProvider(gen)); // должен идти под includeClient()
+        }
     }
-
 }
+
