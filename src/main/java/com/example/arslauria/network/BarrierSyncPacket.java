@@ -7,19 +7,38 @@ import net.minecraft.client.Minecraft;
 
 import java.util.function.Supplier;
 
-public record BarrierSyncPacket(int entityId, boolean add, int durationTicks) {
+public record BarrierSyncPacket(
+        int entityId,
+        boolean add,
+        int durationTicks,
+        int totalMagic,
+        int totalMagicMax,
+        int totalPhys,
+        int totalPhysMax
+) {
     public static void encode(BarrierSyncPacket pkt, FriendlyByteBuf buf) {
         buf.writeInt(pkt.entityId);
         buf.writeBoolean(pkt.add);
         buf.writeInt(pkt.durationTicks);
+        buf.writeInt(pkt.totalMagic);
+        buf.writeInt(pkt.totalMagicMax);
+        buf.writeInt(pkt.totalPhys);
+        buf.writeInt(pkt.totalPhysMax);
     }
     public static BarrierSyncPacket decode(FriendlyByteBuf buf) {
-        return new BarrierSyncPacket(buf.readInt(), buf.readBoolean(), buf.readInt());
+        return new BarrierSyncPacket(
+                buf.readInt(),
+                buf.readBoolean(),
+                buf.readInt(),
+                buf.readInt(),
+                buf.readInt(),
+                buf.readInt(),
+                buf.readInt()
+        );
     }
 
     public static void handle(BarrierSyncPacket pkt, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
-            // Этот код выполняется на стороне получателя (клиент)
             try {
                 if (Minecraft.getInstance() == null || Minecraft.getInstance().level == null) return;
             } catch (Throwable t) {
@@ -27,9 +46,17 @@ public record BarrierSyncPacket(int entityId, boolean add, int durationTicks) {
             }
 
             if (pkt.add) {
-                // durationTicks может быть 0 — тогда держим дефолт 1s (опционально)
-                ClientBarrierData.add(pkt.entityId, Math.max(pkt.durationTicks, 0));
-                System.out.println("[BarrierSyncPacket] add for entity " + pkt.entityId + " dur=" + pkt.durationTicks);
+                ClientBarrierData.add(
+                        pkt.entityId,
+                        Math.max(pkt.durationTicks, 0),
+                        pkt.totalMagic,
+                        pkt.totalMagicMax,
+                        pkt.totalPhys,
+                        pkt.totalPhysMax
+                );
+                System.out.println("[BarrierSyncPacket] add for entity " + pkt.entityId + " dur=" + pkt.durationTicks
+                        + " magic=" + pkt.totalMagic + "/" + pkt.totalMagicMax
+                        + " phys=" + pkt.totalPhys + "/" + pkt.totalPhysMax);
             } else {
                 ClientBarrierData.remove(pkt.entityId);
                 System.out.println("[BarrierSyncPacket] remove for entity " + pkt.entityId);

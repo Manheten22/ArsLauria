@@ -42,6 +42,7 @@ public final class NetworkHandler {
         }
 
         LOGGER.info("[NetworkHandler] init() called — registering channel & messages");
+
         CHANNEL = NetworkRegistry.newSimpleChannel(
                 new ResourceLocation(Lauria.MOD_ID, "main"),
                 () -> PROTOCOL_VERSION,

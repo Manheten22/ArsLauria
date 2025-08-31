@@ -43,7 +43,27 @@ public class BarrierDomeRenderer {
     private static final double MAX_RENDER_DISTANCE = 64.0;
     // Толщина граней в unit-cube (0..1). 0.02 ≈ 1/50 блока — тонкая грань.
     private static final float THICKNESS = 0.02f;
+    private static final java.util.concurrent.ConcurrentHashMap<Integer, Long> LAST_PARTICLE = new java.util.concurrent.ConcurrentHashMap<>();
+
     // --------------------------------
+
+    private static void spawnCrackParticles(LivingEntity entity) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return;
+        double cx = entity.getX();
+        double cy = entity.getY() + entity.getBbHeight() * 0.5;
+        double cz = entity.getZ();
+        // несколько частиц случайно по кубу
+        for (int i = 0; i < 3; i++) {
+            double rx = (Math.random() - 0.5) * entity.getBbWidth();
+            double ry = (Math.random() - 0.5) * entity.getBbHeight();
+            double rz = (Math.random() - 0.5) * entity.getBbWidth();
+            mc.level.addParticle(net.minecraft.core.particles.ParticleTypes.DAMAGE_INDICATOR,
+                    cx + rx, cy + ry, cz + rz,
+                    0.0, 0.0, 0.0);
+        }
+    }
+
 
     @SubscribeEvent
     public static void onRenderLevelStage(RenderLevelStageEvent event) {
@@ -142,6 +162,30 @@ public class BarrierDomeRenderer {
         // масштабируем unit-cube в target размеры
         ms.scale(targetX, targetY, targetZ);
 
+        boolean cracking = com.example.arslauria.client.ClientBarrierData.isCracking(entity.getId());
+        if (cracking) {
+            // пульсация (маленькая): делаем scale относительно центра unit-cube
+            float jitter = 1.0f + (float)Math.sin(System.currentTimeMillis() / 120.0) * 0.02f; // ~2% масштаб
+            // центр unit-cube = (0.5,0.5,0.5)
+            ms.translate(0.5, 0.5, 0.5);
+            ms.scale(jitter, jitter, jitter);
+            ms.translate(-0.5, -0.5, -0.5);
+
+            // спавн частиц с тайротлом (чтобы не спамить) — используем статическую карту
+            long now = System.currentTimeMillis();
+            Long last = LAST_PARTICLE.putIfAbsent(entity.getId(), now);
+            if (last == null) {
+                // только добавили — spawn сразу
+                spawnCrackParticles(entity);
+                LAST_PARTICLE.put(entity.getId(), now);
+            } else {
+                if (now - last >= 200) { // каждые ~200ms
+                    spawnCrackParticles(entity);
+                    LAST_PARTICLE.put(entity.getId(), now);
+                }
+            }
+        }
+
         BlockState state = Blocks.WHITE_STAINED_GLASS.defaultBlockState();
 
         // Толщина в локальных unit-координатах
@@ -191,6 +235,7 @@ public class BarrierDomeRenderer {
 
         ms.popPose();
     }
+
 
     private static double interpolate(double prev, double now, float pt) {
         return prev + (now - prev) * pt;
