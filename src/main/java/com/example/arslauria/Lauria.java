@@ -7,6 +7,7 @@ import com.hollingsworth.arsnouveau.setup.registry.CreativeTabRegistry;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.common.capabilities.RegisterCapabilitiesEvent;
 import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.server.ServerStartingEvent;
@@ -30,14 +31,13 @@ public class Lauria
     @SuppressWarnings("removal")
     public Lauria() {
         IEventBus modbus = FMLJavaModLoadingContext.get().getModEventBus();
+        ModRegistry.registerRegistries(modbus);
 
+        ArsNouveauRegistry.registerGlyphs();
         ModItems.register(modbus);
 
-        ModRegistry.registerRegistries(modbus);
-        ArsNouveauRegistry.registerGlyphs();
         modbus.addListener(this::setup);
         modbus.addListener(this::doClientStuff);
-        modbus.addListener(this::addCreative);
         modbus.addListener(this::doTabThings);
 
         MinecraftForge.EVENT_BUS.register(this);
@@ -51,7 +51,6 @@ public class Lauria
     private void setup(final FMLCommonSetupEvent event)
     {
         ArsNouveauRegistry.registerSounds();
-
     }
 
     private void doClientStuff(final FMLClientSetupEvent event) {
@@ -66,11 +65,11 @@ public class Lauria
         }
     }
 
-    private void addCreative(BuildCreativeModeTabContentsEvent event) {
-        if (event.getTabKey() == CreativeModeTabs.INGREDIENTS) {
-            event.accept(ModItems.SAPPHIRE);
-        }
+    @SubscribeEvent
+    public void doCapabilities(RegisterCapabilitiesEvent event){
+
     }
+
     @SubscribeEvent
     public void onRegisterCommands(RegisterCommandsEvent event) {
         ModCommands.register(event.getDispatcher());

@@ -6,9 +6,7 @@
 
     "arslauria.glyph_name.glyph_blast": "Blast",
    "arslauria.glyph_desc.glyph_blast": "This is my test!",
-    "arslauria.glyph_tier.glyph_blast": "ONE",
 
     "arslauria.glyph_name.glyph_barrier": "Barrier",
-    "arslauria.glyph_desc.glyph_barrier": "Creates a protective barrier capable of absorbing damage (stacks, diminishing returns).",
-    "arslauria.glyph_tier.glyph_barrier": "TWO"
+    "arslauria.glyph_desc.glyph_barrier": "Creates a protective barrier capable of absorbing damage (stacks, diminishing returns)."
 }

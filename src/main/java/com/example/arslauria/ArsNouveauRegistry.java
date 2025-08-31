@@ -23,7 +23,6 @@ public class ArsNouveauRegistry {
         register(Barrier.INSTANCE);
     }
     public static void registerSounds(){
-        ModRegistry.EXAMPLE_SPELL_SOUND = SpellSoundRegistry.registerSpellSound(new SpellSound(ModRegistry.EXAMPLE_FAMILY.get(), Component.literal("Example")));
     }
     public static void register(AbstractSpellPart spellPart){
         GlyphRegistry.registerSpell(spellPart);

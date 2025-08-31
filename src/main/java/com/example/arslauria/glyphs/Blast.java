@@ -31,7 +31,7 @@ public class Blast extends AbstractEffect implements IDamageEffect {
 
     @Override
     public int getDefaultManaCost() {
-        return 100;
+        return 50;
     }
 
     @Override

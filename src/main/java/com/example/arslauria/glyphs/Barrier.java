@@ -19,7 +19,7 @@ import static com.example.arslauria.Lauria.prefix;
 
 public class Barrier extends AbstractEffect {
 
-    public static final Barrier INSTANCE =
+    public static Barrier INSTANCE =
             new Barrier(prefix("glyph_barrier"), "Barrier");
 
     public static final int BASE_DURATION = 10 * 20; // 10 секунд
@@ -32,7 +32,7 @@ public class Barrier extends AbstractEffect {
     @Override
     public void onResolve(HitResult trace,
                           Level world,
-                          @Nonnull LivingEntity shooter,
+                          @NotNull LivingEntity shooter,
                           SpellStats stats,
                           SpellContext ctx,
                           SpellResolver resolver) {
@@ -92,7 +92,7 @@ public class Barrier extends AbstractEffect {
 
     @Override
     protected int getDefaultManaCost() {
-        return 80;
+        return 0;
     }
     @Override
     public SpellTier defaultTier() {
@@ -110,11 +110,6 @@ public class Barrier extends AbstractEffect {
         return augmentSetOf(
                 com.hollingsworth.arsnouveau.common.spell.augment.AugmentAmplify.INSTANCE
         );
-    }
-
-    @Override
-    public String getBookDescription() {
-        return "Creates a protective barrier capable of absorbing damage (stacks, diminishing returns).";
     }
 
     @NotNull
