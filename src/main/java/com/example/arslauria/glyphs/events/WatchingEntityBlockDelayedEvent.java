@@ -6,38 +6,73 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
- * DelayedSpellEvent, наблюдающий одновременно за сущностью и за блоками вокруг её текущей позиции.
- * Резолвит спелл, когда:
- *  - watched == null || watched.isRemoved()
- *  - или когда в текущей позиции сущности (или соседях) появился непустой блок
- *  - или при достижении таймаута (дефолтный behavior через super)
+ * WatchingEntityBlockDelayedEvent — ждёт появления блока под/вокруг watched entity.
+ * При детекции нового блока ставит duration = 1 и немедленно вызывает super.tick(true),
+ * чтобы движок снизил duration и вызвал resolveSpell() в том же тике.
+ *
+ * Это устраняет ситуацию, когда tick() возвращает до super.tick(...) и события застревают.
  */
 public class WatchingEntityBlockDelayedEvent extends DelayedSpellEvent {
     private static final Logger LOGGER = LogManager.getLogger("arslauria-impact");
 
     private final Entity watched;
+    private boolean resolvedScheduled = false;
     private boolean manuallyResolved = false;
     private int tickCounter = 0;
 
-    /**
-     * @param watched     сущность, за которой наблюдаем (например FallingBlockEntity или enchanted_mage_block)
-     * @param initialHit  HitResult для конструктора DelayedSpellEvent (можно передать rayTraceResult)
-     * @param world       мир
-     * @param resolver    SpellResolver
-     * @param timeoutTicks таймаут в тиках
-     */
+    private final Map<BlockPos, Block> baselineBlocks = new HashMap<>();
+    private static final int R = 1; // radius (3x3x3)
+    private BlockPos lastKnownPos = null;
+
+    private static final int GRACE_TICKS = 3;
+    private boolean removalDetected = false;
+    private int removalTickCounter = 0;
+
     public WatchingEntityBlockDelayedEvent(Entity watched, HitResult initialHit, Level world, SpellResolver resolver, int timeoutTicks) {
-        super(timeoutTicks, initialHit, world, resolver);
+        super(timeoutTicks,
+                (initialHit instanceof BlockHitResult)
+                        ? initialHit
+                        : new BlockHitResult(
+                        (initialHit != null && initialHit.getLocation() != null) ? initialHit.getLocation() : Vec3.ZERO,
+                        Direction.UP,
+                        (initialHit instanceof BlockHitResult) ? ((BlockHitResult) initialHit).getBlockPos() : BlockPos.ZERO,
+                        false),
+                world,
+                resolver);
+
         this.watched = watched;
-        LOGGER.info("WatchingEntityBlockDelayedEvent created for entity {} at initialPos {} with timeoutTicks={}",
-                watched != null ? watched.getType() : "null", watched != null ? watched.blockPosition() : "null", timeoutTicks);
+
+        BlockPos initialPos = (watched != null) ? watched.blockPosition()
+                : (initialHit instanceof BlockHitResult ? ((BlockHitResult) initialHit).getBlockPos() : BlockPos.ZERO);
+
+        try {
+            for (int dx = -R; dx <= R; dx++) {
+                for (int dy = -R; dy <= R; dy++) {
+                    for (int dz = -R; dz <= R; dz++) {
+                        BlockPos p = initialPos.offset(dx, dy, dz);
+                        BlockState state = world.getBlockState(p);
+                        baselineBlocks.put(p, state.getBlock());
+                    }
+                }
+            }
+            lastKnownPos = initialPos;
+            LOGGER.info("WatchingEntityBlockDelayedEvent created for entity {} at initialPos {} timeoutTicks={} baselineSize={}",
+                    watched != null ? watched.getType() : "null", initialPos, timeoutTicks, baselineBlocks.size());
+        } catch (Throwable t) {
+            LOGGER.warn("WatchingEntityBlockDelayedEvent: failed to create baseline: {}", t.toString());
+        }
     }
 
     @Override
@@ -45,89 +80,129 @@ public class WatchingEntityBlockDelayedEvent extends DelayedSpellEvent {
         if (manuallyResolved || world == null) return;
         tickCounter++;
 
-        if (serverSide) {
-            try {
-                // 1) Если сущность удалена — резолвим немедленно
-                if (watched == null || watched.isRemoved()) {
-                    LOGGER.info("WatchingEntityBlockDelayedEvent: watched is null/removed -> resume");
-                    resolver.resume(world);
-                    manuallyResolved = true;
-                    duration = 0;
-                    return;
-                }
+        if (!serverSide) {
+            super.tick(serverSide);
+            return;
+        }
 
-                // 2) Берём текущую позицию сущности (динамически) и проверяем блоки вокруг неё
-                BlockPos current = watched.blockPosition();
-                BlockPos[] toCheck = new BlockPos[] {
-                        current,
-                        current.above(),
-                        current.below(),
-                        current.north(),
-                        current.south(),
-                        current.east(),
-                        current.west(),
-                        current.north().east(),
-                        current.north().west(),
-                        current.south().east(),
-                        current.south().west()
-                };
+        try {
+            if (watched != null && !watched.isRemoved()) {
+                lastKnownPos = watched.blockPosition();
+            }
 
-                boolean found = false;
-                String foundInfo = null;
-                for (BlockPos p : toCheck) {
-                    var state = world.getBlockState(p);
-                    if (!state.isAir()) {
-                        found = true;
-                        foundInfo = p + " -> " + state.getBlock();
-                        break;
+            if (watched == null || watched.isRemoved()) {
+                if (!removalDetected) {
+                    removalDetected = true;
+                    removalTickCounter = 0;
+                    LOGGER.info("WatchingEntityBlockDelayedEvent: watched removed -> starting grace period ({} ticks) at lastKnownPos={}", GRACE_TICKS, lastKnownPos);
+                } else {
+                    removalTickCounter++;
+                    if (checkForNewBlockAround(lastKnownPos)) {
+                        LOGGER.info("WatchingEntityBlockDelayedEvent: new block detected during grace -> schedule resolve next tick (pos={})", lastKnownPos);
+                        scheduleResolveNextTickAndForceTick();
+                        return;
+                    }
+                    if (removalTickCounter >= GRACE_TICKS) {
+                        LOGGER.info("WatchingEntityBlockDelayedEvent: grace expired without new block -> schedule resolve next tick (pos={})", lastKnownPos);
+                        scheduleResolveNextTickAndForceTick();
+                        return;
+                    } else {
+                        LOGGER.debug("WatchingEntityBlockDelayedEvent: still in grace (tick {}/{}) at {}", removalTickCounter, GRACE_TICKS, lastKnownPos);
+                        super.tick(serverSide);
+                        return;
                     }
                 }
-
-                if (found) {
-                    LOGGER.info("WatchingEntityBlockDelayedEvent: block detected near entity at {}: {} -> resume", current, foundInfo);
-                    resolver.resume(world);
-                    manuallyResolved = true;
-                    duration = 0;
+            } else {
+                if (checkForNewBlockAround(lastKnownPos)) {
+                    LOGGER.info("WatchingEntityBlockDelayedEvent: detected NEW block near entity at {} -> schedule resolve next tick", lastKnownPos);
+                    scheduleResolveNextTickAndForceTick();
                     return;
                 }
 
-                // 3) Эвристика: если вертикальная скорость мала (почти ноль), считаем, что приземлился
-                Vec3 vel = watched.getDeltaMovement();
+                var vel = watched.getDeltaMovement();
                 if (vel != null) {
                     double vy = vel.y;
                     if (Math.abs(vy) < 0.02) {
-                        // проверим блок чуть ниже как дополнительную эвристику
-                        BlockPos below = current.below();
-                        var belowState = world.getBlockState(below);
+                        BlockPos below = lastKnownPos.below();
+                        BlockState belowState = world.getBlockState(below);
                         if (!belowState.isAir()) {
-                            LOGGER.info("WatchingEntityBlockDelayedEvent: low vy={} and non-air below at {} -> resume", vy, below);
-                            resolver.resume(world);
-                            manuallyResolved = true;
-                            duration = 0;
+                            LOGGER.info("WatchingEntityBlockDelayedEvent: low vy={} and non-air below at {} -> schedule resolve next tick", vy, below);
+                            scheduleResolveNextTickAndForceTick();
                             return;
                         }
                     }
                 }
 
-                // 4) Логирование для отладки (каждые 5 тиков)
                 if (tickCounter % 5 == 0) {
-                    LOGGER.debug("WatchingEntityBlockDelayedEvent tick: entity at {} (vy={}), no block near (duration={})",
-                            current, vel != null ? vel.y : Double.NaN, duration);
+                    LOGGER.debug("WatchingEntityBlockDelayedEvent tick: entity at {} (vy={}), no NEW block found (duration={})",
+                            lastKnownPos, watched != null ? watched.getDeltaMovement().y : Double.NaN, duration);
                 }
-            } catch (Throwable t) {
-                LOGGER.warn("WatchingEntityBlockDelayedEvent tick exception: {}", t.toString());
             }
+        } catch (Throwable t) {
+            LOGGER.warn("WatchingEntityBlockDelayedEvent tick exception: {}", t.toString());
         }
 
-        // базовая логика уменьшения duration / таймаут
         super.tick(serverSide);
+    }
+
+    /**
+     * Устанавливает duration=1 и немедленно вызывает super.tick(true) (в серверном потоке),
+     * чтобы гарантированно уменьшить duration и вызвать resolveSpell() в том же тике.
+     */
+    private void scheduleResolveNextTickAndForceTick() {
+        synchronized (this) {
+            if (resolvedScheduled || manuallyResolved) {
+                LOGGER.debug("scheduleResolveNextTick: already scheduled or manuallyResolved -> skip");
+                return;
+            }
+            this.duration = 1;
+            resolvedScheduled = true;
+            LOGGER.info("WatchingEntityBlockDelayedEvent: resolve scheduled (duration set to 1). Forcing super.tick(true) to finalize this tick.");
+        }
+
+        // Немедленный вызов super.tick(true) — выполняется в том же потоке, т.к. мы уже на серверном потоке.
+        try {
+            super.tick(true); // это уменьшит duration и вызовет resolveSpell() если duration <= 0
+        } catch (Throwable t) {
+            LOGGER.warn("scheduleResolveNextTickAndForceTick: super.tick(true) threw: {}", t.toString());
+        }
+    }
+
+    private boolean checkForNewBlockAround(BlockPos center) {
+        if (center == null) return false;
+        for (int dx = -R; dx <= R; dx++) {
+            for (int dy = -R; dy <= R; dy++) {
+                for (int dz = -R; dz <= R; dz++) {
+                    BlockPos p = center.offset(dx, dy, dz);
+                    BlockState state = world.getBlockState(p);
+                    Block now = state.getBlock();
+                    Block baseline = baselineBlocks.get(p);
+                    if (baseline == null) {
+                        baselineBlocks.put(p, now);
+                        baseline = now;
+                    }
+                    if (!now.equals(baseline) && !state.isAir()) {
+                        LOGGER.debug("checkForNewBlockAround: new block at {} now={} baseline={}", p, now, baseline);
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     @Override
     public void resolveSpell() {
-        LOGGER.info("WatchingEntityBlockDelayedEvent.resolveSpell called (manuallyResolved={}) for watched={}", manuallyResolved, watched != null ? watched.getType() : "null");
-        if (manuallyResolved) return;
-        super.resolveSpell();
+        LOGGER.info("WatchingEntityBlockDelayedEvent.resolveSpell called (resolvedScheduled={}, manuallyResolved={}) for watched={}",
+                resolvedScheduled, manuallyResolved, watched != null ? watched.getType() : "null");
+        synchronized (this) {
+            if (manuallyResolved) {
+                LOGGER.debug("resolveSpell: manuallyResolved=true -> skipping super.resolveSpell()");
+                return;
+            }
+            manuallyResolved = true;
+        }
+        super.resolveSpell(); // this will call resolver.resume(world)
     }
 
     @Override

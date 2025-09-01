@@ -45,6 +45,9 @@ public class EffectImpact extends AbstractEffect {
         return 0;
     }
 
+    /**
+     * Быстрая эвристика для определения "mage-like" сущности.
+     */
     private boolean looksLikeMageBlock(Entity e) {
         if (e == null) return false;
         String typeStr = e.getType() != null ? e.getType().toString().toLowerCase() : "";
@@ -69,7 +72,7 @@ public class EffectImpact extends AbstractEffect {
                                SpellStats spellStats, SpellContext spellContext, SpellResolver resolver) {
 
         String spellInfo = spellContext.getSpell() != null ? spellContext.getSpell().toString() : "null";
-        LOGGER.info("onResolveBlock called. serverSide={}, hitPos={}, currentIndex={}, spell={}",
+        LOGGER.info("EffectImpact.onResolveBlock called. serverSide={}, hitPos={}, currentIndex={}, spell={}",
                 !world.isClientSide(), rayTraceResult.getLocation(), spellContext.getCurrentIndex(), spellInfo);
 
         Vec3 hitVec = rayTraceResult.getLocation();
@@ -78,30 +81,43 @@ public class EffectImpact extends AbstractEffect {
 
         for (double r : radii) {
             Entity candidate = findNearbyMageLikeEntity(world, hitVec, r);
-            LOGGER.debug("search radius={}, candidate={}", r, candidate != null ? candidate.getType().toString() + "@" + candidate.blockPosition() : "null");
+            LOGGER.debug("EffectImpact: search radius={}, candidate={}", r, candidate != null ? candidate.getType().toString() + "@" + candidate.blockPosition() : "null");
             if (candidate != null) {
-                LOGGER.info("Found candidate entity of type {} at {} (isRemoved={})", candidate.getType(), candidate.blockPosition(), candidate.isRemoved());
+                LOGGER.info("EffectImpact: Found candidate entity of type {} at {} (isRemoved={})", candidate.getType(), candidate.blockPosition(), candidate.isRemoved());
                 if (candidate.isRemoved()) {
-                    LOGGER.info("Candidate already removed -> resolving immediately.");
-                    resolver.resume(world);
+                    LOGGER.info("EffectImpact: candidate already removed -> calling resolver.resume(world) immediately for pos {}", candidate.blockPosition());
+                    try {
+                        resolver.resume(world);
+                        LOGGER.info("EffectImpact: resolver.resume(world) called successfully for pos {}", candidate.blockPosition());
+                    } catch (Throwable t) {
+                        LOGGER.warn("EffectImpact: resolver.resume(world) threw exception: {}", t.toString());
+                    }
                     return;
                 }
 
-                int timeoutTicks = 20 * 60; // 60s default (для теста можно уменьшить до 20*5)
+                // Создаём событие ожидания (наблюдает сущность и появление блока рядом)
+                int timeoutTicks = 20 * 60; // 60s по умолчанию; для теста можно поставить 20*5
                 var event = new WatchingEntityBlockDelayedEvent(candidate, rayTraceResult, world, resolver, timeoutTicks);
-                // Сообщаем контексту о задержке
+
+                LOGGER.info("EffectImpact: about to delay event for candidate at {} (currentIndex={})", candidate.blockPosition(), spellContext.getCurrentIndex());
                 spellContext.delay(event);
-                // Также регистрируем в EventQueue, чтобы гарантировать тики
+                LOGGER.info("EffectImpact: delayed event for candidate at {} (currentIndex={})", candidate.blockPosition(), spellContext.getCurrentIndex());
+
                 if (!world.isClientSide()) {
                     EventQueue.getServerInstance().addEvent(event);
+                    LOGGER.info("EffectImpact: added event to EventQueue for {}", candidate.blockPosition());
                 }
-                LOGGER.info("WatchingEntityBlockDelayedEvent added for entity at pos {}", candidate.blockPosition());
                 return;
             }
         }
 
-        LOGGER.info("No mage-like entity found near hit -> resolving immediately.");
-        resolver.resume(world);
+        LOGGER.info("EffectImpact: No mage-like entity found near hit -> resolving immediately.");
+        try {
+            resolver.resume(world);
+            LOGGER.info("EffectImpact: resolver.resume(world) called (no candidate).");
+        } catch (Throwable t) {
+            LOGGER.warn("EffectImpact: resolver.resume(world) threw exception (no candidate): {}", t.toString());
+        }
     }
 
     @Override
@@ -110,47 +126,73 @@ public class EffectImpact extends AbstractEffect {
 
         String spellInfo = spellContext.getSpell() != null ? spellContext.getSpell().toString() : "null";
         String entityInfo = rayTraceResult.getEntity() != null ? rayTraceResult.getEntity().getType().toString() : "null";
-        LOGGER.info("onResolveEntity called. serverSide={}, entity={}, currentIndex={}, spell={}",
+        LOGGER.info("EffectImpact.onResolveEntity called. serverSide={}, entity={}, currentIndex={}, spell={}",
                 !world.isClientSide(), entityInfo, spellContext.getCurrentIndex(), spellInfo);
 
         Entity hit = rayTraceResult.getEntity();
         if (looksLikeMageBlock(hit)) {
-            LOGGER.info("Hit entity looks like mage block: {}, isRemoved={}", hit.getType(), hit.isRemoved());
+            LOGGER.info("EffectImpact: Hit entity looks like mage block: {}, isRemoved={}", hit.getType(), hit.isRemoved());
             if (hit.isRemoved()) {
-                resolver.resume(world);
+                LOGGER.info("EffectImpact: hit entity already removed -> calling resolver.resume(world) immediately for pos {}", hit.blockPosition());
+                try {
+                    resolver.resume(world);
+                    LOGGER.info("EffectImpact: resolver.resume(world) called successfully for removed hit entity at {}", hit.blockPosition());
+                } catch (Throwable t) {
+                    LOGGER.warn("EffectImpact: resolver.resume(world) threw exception for removed hit entity: {}", t.toString());
+                }
                 return;
             }
 
-            int timeoutTicks = 20 * 60;
+            int timeoutTicks = 20 * 60; // 60s default
             var event = new WatchingEntityBlockDelayedEvent(hit, rayTraceResult, world, resolver, timeoutTicks);
+
+            LOGGER.info("EffectImpact: about to delay event for hit entity at {} (currentIndex={})", hit.blockPosition(), spellContext.getCurrentIndex());
             spellContext.delay(event);
+            LOGGER.info("EffectImpact: delayed event for hit entity at {} (currentIndex={})", hit.blockPosition(), spellContext.getCurrentIndex());
+
             if (!world.isClientSide()) {
                 EventQueue.getServerInstance().addEvent(event);
+                LOGGER.info("EffectImpact: added event to EventQueue for hit entity pos {}", hit.blockPosition());
             }
-            LOGGER.info("WatchingEntityBlockDelayedEvent added for hit entity pos {}", hit.blockPosition());
             return;
         }
 
         Vec3 hitVec = rayTraceResult.getLocation();
         Entity nearby = findNearbyMageLikeEntity(world, hitVec, 12.0);
-        LOGGER.debug("Nearby search for mage-like entity returned: {}", nearby != null ? nearby.getType().toString() + "@" + nearby.blockPosition() : "null");
+        LOGGER.debug("EffectImpact: Nearby search for mage-like entity returned: {}", nearby != null ? nearby.getType().toString() + "@" + nearby.blockPosition() : "null");
         if (nearby != null) {
+            LOGGER.info("EffectImpact: Found nearby entity {} at {} (isRemoved={})", nearby.getType(), nearby.blockPosition(), nearby.isRemoved());
             if (nearby.isRemoved()) {
-                resolver.resume(world);
+                LOGGER.info("EffectImpact: nearby entity already removed -> calling resolver.resume(world) for pos {}", nearby.blockPosition());
+                try {
+                    resolver.resume(world);
+                    LOGGER.info("EffectImpact: resolver.resume(world) called successfully for nearby removed entity at {}", nearby.blockPosition());
+                } catch (Throwable t) {
+                    LOGGER.warn("EffectImpact: resolver.resume(world) threw exception for nearby removed entity: {}", t.toString());
+                }
                 return;
             }
             int timeoutTicks = 20 * 60;
             var event = new WatchingEntityBlockDelayedEvent(nearby, rayTraceResult, world, resolver, timeoutTicks);
+
+            LOGGER.info("EffectImpact: about to delay event for nearby entity at {} (currentIndex={})", nearby.blockPosition(), spellContext.getCurrentIndex());
             spellContext.delay(event);
+            LOGGER.info("EffectImpact: delayed event for nearby entity at {} (currentIndex={})", nearby.blockPosition(), spellContext.getCurrentIndex());
+
             if (!world.isClientSide()) {
                 EventQueue.getServerInstance().addEvent(event);
+                LOGGER.info("EffectImpact: added event to EventQueue for nearby entity pos {}", nearby.blockPosition());
             }
-            LOGGER.info("WatchingEntityBlockDelayedEvent added for nearby entity pos {}", nearby.blockPosition());
             return;
         }
 
-        LOGGER.info("Entity hit is not mage-like -> resolving immediately.");
-        resolver.resume(world);
+        LOGGER.info("EffectImpact: Entity hit is not mage-like -> resolving immediately.");
+        try {
+            resolver.resume(world);
+            LOGGER.info("EffectImpact: resolver.resume(world) called (entity not mage-like).");
+        } catch (Throwable t) {
+            LOGGER.warn("EffectImpact: resolver.resume(world) threw exception (entity not mage-like): {}", t.toString());
+        }
     }
 
     @Nonnull
