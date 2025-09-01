@@ -29,8 +29,8 @@ apply plugin: 'maven-publish'
 
 
 version = "${mc_version}-${mod_version}"
-group = 'com.hollingsworth.an_addon' // http://maven.apache.org/guides/mini/guide-naming-conventions.html
-archivesBaseName = 'an_addon'
+group = 'com.hollingsworth.arslauria' // http://maven.apache.org/guides/mini/guide-naming-conventions.html
+archivesBaseName = 'arslauria'
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 minecraft {
@@ -55,7 +55,7 @@ minecraft {
             property 'forge.logging.console.level', 'debug'
 
             mods {
-                an_addon {
+                arslauria {
                     source sourceSets.main
                 }
             }
@@ -73,7 +73,7 @@ minecraft {
             property 'forge.logging.console.level', 'debug'
 
             mods {
-                an_addon {
+                arslauria {
                     source sourceSets.main
                 }
             }
@@ -89,10 +89,10 @@ minecraft {
             // Recommended logging level for the console
             property 'forge.logging.console.level', 'debug'
             // Specify the modid for data generation, where to output the resulting resource, and where to look for existing resources.
-            args '--mod', 'an_addon', '--all', '--output', file('src/generated/resources/'), "--existing", file('src/main/resources/')
+            args '--mod', 'arslauria', '--all', '--output', file('src/generated/resources/'), "--existing", file('src/main/resources/')
 
             mods {
-                an_addon {
+                arslauria {
                     source sourceSets.main
                 }
             }
