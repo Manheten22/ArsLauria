@@ -1,6 +1,7 @@
 package com.example.arslauria.glyphs;
 
 import com.example.arslauria.Lauria;
+import com.example.arslauria.glyphs.events.WatchingBlockPosDelayedEvent;
 import com.example.arslauria.glyphs.events.WatchingEntityBlockDelayedEvent;
 import com.hollingsworth.arsnouveau.api.event.EventQueue;
 import com.hollingsworth.arsnouveau.api.spell.AbstractAugment;
@@ -10,11 +11,15 @@ import com.hollingsworth.arsnouveau.api.spell.SpellResolver;
 import com.hollingsworth.arsnouveau.api.spell.SpellStats;
 import com.hollingsworth.arsnouveau.api.spell.SpellTier;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.FallingBlockEntity;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.FallingBlock;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.*;
 import net.minecraft.world.phys.AABB;
 import org.apache.logging.log4j.LogManager;
@@ -28,7 +33,8 @@ import java.util.Set;
 
 /**
  * EffectImpact — эффект, который ищет рядом "mage block" (enchanted_mage_block / FallingBlockEntity)
- * и ждёт, пока он "приземлится" или исчезнет, затем резолвит спелл.
+ * и ждёт, пока он "приземлится" или исчезнет, затем резолвит спелл. Дополнительно поддерживает
+ * отложение по BlockPos для падающих блоков и логов (BlockTags.LOGS).
  */
 public class EffectImpact extends AbstractEffect {
 
@@ -50,8 +56,19 @@ public class EffectImpact extends AbstractEffect {
      */
     private boolean looksLikeMageBlock(Entity e) {
         if (e == null) return false;
+        // Проверяем реестрный тип сущности (строка), а также конкретный класс для падающих блоков
         String typeStr = e.getType() != null ? e.getType().toString().toLowerCase() : "";
-        return typeStr.contains("mage_block") || typeStr.contains("enchanted_mage_block") || e instanceof FallingBlockEntity;
+        if (typeStr.contains("mage_block")
+                || typeStr.contains("enchanted_mage_block")
+                || typeStr.contains("enchanted_falling_block")
+                || typeStr.contains("falling")) {
+            return true;
+        }
+        // Подстраховка по классу
+        if (e instanceof FallingBlockEntity) {
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -79,11 +96,14 @@ public class EffectImpact extends AbstractEffect {
 
         double[] radii = {1.5, 3.0, 6.0, 12.0, 24.0};
 
+        // 1) Сначала ищем nearby mage-like entity (например enchanted_mage_block / enchanted_falling_block)
         for (double r : radii) {
             Entity candidate = findNearbyMageLikeEntity(world, hitVec, r);
-            LOGGER.debug("EffectImpact: search radius={}, candidate={}", r, candidate != null ? candidate.getType().toString() + "@" + candidate.blockPosition() : "null");
+            LOGGER.debug("EffectImpact: search radius={}, candidate={}", r,
+                    candidate != null ? candidate.getType().toString() + "@" + candidate.blockPosition() : "null");
             if (candidate != null) {
-                LOGGER.info("EffectImpact: Found candidate entity of type {} at {} (isRemoved={})", candidate.getType(), candidate.blockPosition(), candidate.isRemoved());
+                LOGGER.info("EffectImpact: Found candidate entity of type {} at {} (isRemoved={})",
+                        candidate.getType(), candidate.blockPosition(), candidate.isRemoved());
                 if (candidate.isRemoved()) {
                     LOGGER.info("EffectImpact: candidate already removed -> calling resolver.resume(world) immediately for pos {}", candidate.blockPosition());
                     try {
@@ -95,8 +115,7 @@ public class EffectImpact extends AbstractEffect {
                     return;
                 }
 
-                // Создаём событие ожидания (наблюдает сущность и появление блока рядом)
-                int timeoutTicks = 20 * 60; // 60s по умолчанию; для теста можно поставить 20*5
+                int timeoutTicks = 20 * 60; // 60s по умолчанию
                 var event = new WatchingEntityBlockDelayedEvent(candidate, rayTraceResult, world, resolver, timeoutTicks);
 
                 LOGGER.info("EffectImpact: about to delay event for candidate at {} (currentIndex={})", candidate.blockPosition(), spellContext.getCurrentIndex());
@@ -111,7 +130,30 @@ public class EffectImpact extends AbstractEffect {
             }
         }
 
-        LOGGER.info("EffectImpact: No mage-like entity found near hit -> resolving immediately.");
+        // 2) Если nearby entity не найден — проверяем сам блок, по которому попали.
+        BlockPos hitPos = rayTraceResult.getBlockPos();
+        BlockState state = world.getBlockState(hitPos);
+        boolean isFallingBlock = state.getBlock() instanceof FallingBlock;
+        boolean isLog = state.is(BlockTags.LOGS);
+
+        LOGGER.debug("EffectImpact: hit block at {} -> block={} falling={} log={}", hitPos, state.getBlock(), isFallingBlock, isLog);
+
+        if (isFallingBlock || isLog) {
+            // Для падающих блоков и логов — создаём WatchingBlockPosDelayedEvent (наблюдение за BlockPos)
+            int timeoutTicks = 20 * 60;
+            var event = new WatchingBlockPosDelayedEvent(hitPos, world, resolver, timeoutTicks);
+
+            LOGGER.info("EffectImpact: creating WatchingBlockPosDelayedEvent for hitPos {} (falling={} log={})", hitPos, isFallingBlock, isLog);
+            spellContext.delay(event);
+            if (!world.isClientSide()) {
+                EventQueue.getServerInstance().addEvent(event);
+                LOGGER.info("EffectImpact: added BlockPos event to EventQueue for {}", hitPos);
+            }
+            return;
+        }
+
+        // 3) Ничего подходящего не найдено — резолвим немедленно
+        LOGGER.info("EffectImpact: No mage-like entity or supported block found near hit -> resolving immediately.");
         try {
             resolver.resume(world);
             LOGGER.info("EffectImpact: resolver.resume(world) called (no candidate).");
@@ -157,6 +199,7 @@ public class EffectImpact extends AbstractEffect {
             return;
         }
 
+        // Если не mage-like — попробуем найти nearby mage-like entity в радиусе 12 (как раньше)
         Vec3 hitVec = rayTraceResult.getLocation();
         Entity nearby = findNearbyMageLikeEntity(world, hitVec, 12.0);
         LOGGER.debug("EffectImpact: Nearby search for mage-like entity returned: {}", nearby != null ? nearby.getType().toString() + "@" + nearby.blockPosition() : "null");
