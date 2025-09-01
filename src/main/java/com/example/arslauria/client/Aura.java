@@ -1,3 +1,4 @@
+/*
 package com.example.arslauria.client;
 
 import com.example.arslauria.ModCommands;
@@ -66,3 +67,5 @@ public class Aura {
         }
     }
 }
+
+ */

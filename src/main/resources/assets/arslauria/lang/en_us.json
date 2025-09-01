@@ -5,8 +5,11 @@
 	"item.arslauria.star_hat": "Example hat",
 
     "arslauria.glyph_name.glyph_blast": "Blast",
-    "arslauria.glyph_desc.glyph_blast": "",
+    "arslauria.glyph_desc.glyph_blast": "Creates a non-destructive explosion with a bright flash; Amplify boosts damage and radius slightly; AoE expands radius without increasing damage.",
 
     "arslauria.glyph_name.glyph_barrier": "Barrier",
-    "arslauria.glyph_desc.glyph_barrier": "Creates a protective barrier capable of absorbing damage (stacks, diminishing returns)."
+    "arslauria.glyph_desc.glyph_barrier": "Creates a protective barrier capable of absorbing damage (stacks, diminishing returns).",
+
+    "arslauria.glyph_name.glyph_impact": "Impact",
+    "arslauria.glyph_desc.glyph_impact": ""
 }

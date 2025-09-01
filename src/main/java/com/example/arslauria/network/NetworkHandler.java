@@ -32,6 +32,8 @@ public final class NetworkHandler {
      * Инициализировать канал и зарегистрировать пакеты.
      * Вызывать в FMLCommonSetupEvent (common setup).
      */
+    @SuppressWarnings("removal")
+
     public static void init() {
         if (CHANNEL != null) {
             LOGGER.debug("[NetworkHandler] already initialized, skipping");
@@ -39,7 +41,7 @@ public final class NetworkHandler {
         }
 
         LOGGER.info("[NetworkHandler] init() called — registering channel & messages");
-        CHANNEL = NetworkRegistry.newSimpleChannel(
+                CHANNEL = NetworkRegistry.newSimpleChannel(
                 new ResourceLocation(Lauria.MOD_ID, "main"),
                 () -> PROTOCOL_VERSION,
                 PROTOCOL_VERSION::equals,

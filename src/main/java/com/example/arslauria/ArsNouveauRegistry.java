@@ -3,6 +3,7 @@ package com.example.arslauria;
 //import com.example.arslauria.glyphs.Barrier;
 import com.example.arslauria.glyphs.Barrier;
 import com.example.arslauria.glyphs.Blast;
+import com.example.arslauria.glyphs.EffectImpact;
 import com.example.arslauria.glyphs.TestEffect;
 import com.example.arslauria.registry.ModRegistry;
 import com.hollingsworth.arsnouveau.api.registry.GlyphRegistry;
@@ -22,6 +23,7 @@ public class ArsNouveauRegistry {
         register(TestEffect.INSTANCE);
         register(Blast.INSTANCE);
         register(Barrier.INSTANCE);
+        register(EffectImpact.INSTANCE);
 
     }
     public static void registerSounds(){
@@ -36,5 +38,6 @@ public class ArsNouveauRegistry {
         registeredSpells.add(TestEffect.INSTANCE);
         registeredSpells.add(Blast.INSTANCE);
         registeredSpells.add(Barrier.INSTANCE);
+        registeredSpells.add(EffectImpact.INSTANCE);
     }
 }
