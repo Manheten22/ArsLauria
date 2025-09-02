@@ -2,7 +2,6 @@ package com.example.arslauria.glyphs;
 
 import com.example.arslauria.Lauria;
 import com.example.arslauria.glyphs.events.WatchingBlockPosDelayedEvent;
-import com.example.arslauria.glyphs.events.WatchingDelayedSpellEvent;
 import com.example.arslauria.glyphs.events.WatchingEntityBlockDelayedEvent;
 import com.hollingsworth.arsnouveau.api.event.EventQueue;
 import com.hollingsworth.arsnouveau.api.spell.AbstractAugment;
@@ -12,7 +11,6 @@ import com.hollingsworth.arsnouveau.api.spell.SpellResolver;
 import com.hollingsworth.arsnouveau.api.spell.SpellStats;
 import com.hollingsworth.arsnouveau.api.spell.SpellTier;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.Entity;
@@ -38,12 +36,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * EffectImpact — эффект, который ищет рядом "mage block" (enchanted_mage_block / FallingBlockEntity)
  * и ждёт, пока он "приземлится" или исчезнет, затем резолвит спелл.
  *
- * Эта версия:
- * - прогнозирует место приземления падающего блока и создаёт WatchingBlockPosDelayedEvent с радиусом;
- * - создаёт совместно WatchingEntityBlockDelayedEvent и WatchingBlockPosDelayedEvent с общим AtomicBoolean guard,
- *   чтобы resume(world) был вызван ровно один раз;
- * - передаёт expectedBlock в WatchingBlockPosDelayedEvent (если может быть получен из FallingBlockEntity),
- *   чтобы не резолвить на случайные листья/растительность.
+ * Обновлён: согласованное использование shared AtomicBoolean guard и вызов конструктора
+ * WatchingBlockPosDelayedEvent в порядке (center, radius, vBelow, vAbove, expectedBlock, initialHit, world, resolver, timeout, guard).
  */
 public class EffectImpact extends AbstractEffect {
 
@@ -144,7 +138,10 @@ public class EffectImpact extends AbstractEffect {
                     LOGGER.info("EffectImpact: predicted landing center {} from pos {} vel={} -> radius={} (predTicks={}) expectedBlock={}",
                             center, entityPos, vel, radiusInt, predictTicks, expectedBlock != null ? expectedBlock.toString() : "null");
 
-                    var posEvent = new WatchingBlockPosDelayedEvent(center, world, resolver, timeoutTicks, radiusInt, verticalBelow, verticalAbove, guard, expectedBlock);
+                    // Используем конструктор: (center, radius, vBelow, vAbove, expectedBlock, initialHit, world, resolver, timeoutTicks, guard)
+                    var posEvent = new WatchingBlockPosDelayedEvent(center, radiusInt, verticalBelow, verticalAbove, expectedBlock,
+                            rayTraceResult, world, resolver, timeoutTicks, guard);
+
                     var entityEvent = new WatchingEntityBlockDelayedEvent(candidate, rayTraceResult, world, resolver, timeoutTicks, guard);
 
                     spellContext.delay(posEvent);
@@ -197,7 +194,15 @@ public class EffectImpact extends AbstractEffect {
         if (isFallingBlock || isLog) {
             // Для падающих блоков и логов — создаём WatchingBlockPosDelayedEvent (наблюдение за BlockPos)
             int timeoutTicks = 20 * 60;
-            var event = new WatchingBlockPosDelayedEvent(hitPos, world, resolver, timeoutTicks);
+            // для одиночного BlockPos можно использовать маленький радиус, ожидаемый блок = текущий блок
+            Block expected = state.getBlock();
+            int radiusForHit = 1;
+            int vBelow = 1;
+            int vAbove = 0;
+            AtomicBoolean guard = new AtomicBoolean(false);
+
+            var event = new WatchingBlockPosDelayedEvent(hitPos, radiusForHit, vBelow, vAbove, expected,
+                    rayTraceResult, world, resolver, timeoutTicks, guard);
 
             LOGGER.info("EffectImpact: creating WatchingBlockPosDelayedEvent for hitPos {} (falling={} log={})", hitPos, isFallingBlock, isLog);
             spellContext.delay(event);
@@ -247,9 +252,6 @@ public class EffectImpact extends AbstractEffect {
                 typeStr, looksLikeMage, isFalling, isMageBlock);
 
         // --------- Special-case: real mage_block (non-falling) ---------------
-        // Для enchanted_mage_block (классический mage block) используем простую
-        // и надёжную логику: WatchingDelayedSpellEvent (ваш WatchingDelayedSpellEvent),
-        // которая реагирует на удаление сущности / появление блока под ней / низкую скорость и т.д.
         if (isMageBlock && !isFalling) {
             LOGGER.info("EffectImpact: Handling mage_block (non-falling) with WatchingDelayedSpellEvent at pos {}", hit.blockPosition());
 
@@ -263,8 +265,8 @@ public class EffectImpact extends AbstractEffect {
                 return;
             }
 
-            int timeoutTicks = 20 * 30; // 30 seconds — можно увеличить/уменьшить при необходимости
-            var event = new WatchingDelayedSpellEvent(hit, rayTraceResult, world, resolver, timeoutTicks);
+            int timeoutTicks = 20 * 30; // 30 seconds
+            var event = new com.example.arslauria.glyphs.events.WatchingDelayedSpellEvent(hit, rayTraceResult, world, resolver, timeoutTicks);
 
             spellContext.delay(event);
             LOGGER.info("EffectImpact: delayed WatchingDelayedSpellEvent for mage_block at {} (currentIndex={})", hit.blockPosition(), spellContext.getCurrentIndex());
@@ -292,7 +294,7 @@ public class EffectImpact extends AbstractEffect {
             }
 
             // Для падающих блоков и других mage-like создаём COMBINED watchers (pos + entity) с guard
-            java.util.concurrent.atomic.AtomicBoolean guard = new java.util.concurrent.atomic.AtomicBoolean(false);
+            AtomicBoolean guard = new AtomicBoolean(false);
 
             // попытка извлечь expectedBlock (только применимо к FallingBlockEntity)
             Block expectedBlock = null;
@@ -318,7 +320,8 @@ public class EffectImpact extends AbstractEffect {
             LOGGER.info("EffectImpact: predicted landing center {} from pos {} vel={} -> radius={} (predTicks={}) expectedBlock={}",
                     center, entityPos, vel, radius, predictTicks, expectedBlock != null ? expectedBlock.toString() : "null");
 
-            var posEvent = new WatchingBlockPosDelayedEvent(center, world, resolver, timeoutTicks, radius, verticalBelow, verticalAbove, guard, expectedBlock);
+            var posEvent = new WatchingBlockPosDelayedEvent(center, radius, verticalBelow, verticalAbove, expectedBlock,
+                    rayTraceResult, world, resolver, timeoutTicks, guard);
             var entityEvent = new WatchingEntityBlockDelayedEvent(hit, rayTraceResult, world, resolver, timeoutTicks, guard);
 
             spellContext.delay(posEvent);
@@ -340,7 +343,6 @@ public class EffectImpact extends AbstractEffect {
         if (nearby != null) {
             LOGGER.info("EffectImpact: Found nearby entity {} at {} (isRemoved={})", nearby.getType(), nearby.blockPosition(), nearby.isRemoved());
 
-            // If nearby is a mage_block (non-falling), use the mage-specific simple watcher
             String nearbyTypeStr = nearby.getType() != null ? nearby.getType().toString().toLowerCase() : "";
             boolean nearbyIsFalling = nearbyTypeStr.contains("enchanted_falling_block") || (nearby instanceof FallingBlockEntity);
             boolean nearbyIsMageBlock = nearbyTypeStr.contains("mage_block") || nearbyTypeStr.contains("enchanted_mage_block");
@@ -357,7 +359,7 @@ public class EffectImpact extends AbstractEffect {
                     return;
                 }
                 int timeoutTicks = 20 * 30;
-                var event = new WatchingDelayedSpellEvent(nearby, rayTraceResult, world, resolver, timeoutTicks);
+                var event = new com.example.arslauria.glyphs.events.WatchingDelayedSpellEvent(nearby, rayTraceResult, world, resolver, timeoutTicks);
                 spellContext.delay(event);
                 if (!world.isClientSide()) {
                     EventQueue.getServerInstance().addEvent(event);
@@ -368,7 +370,7 @@ public class EffectImpact extends AbstractEffect {
 
             // otherwise use combined watchers for nearby falling or mage-like entities
             LOGGER.info("EffectImpact: nearby is mage-like/falling -> creating combined watchers");
-            java.util.concurrent.atomic.AtomicBoolean guard = new java.util.concurrent.atomic.AtomicBoolean(false);
+            AtomicBoolean guard = new AtomicBoolean(false);
 
             Block expectedBlock = null;
             if (nearby instanceof FallingBlockEntity fbeNearby) {
@@ -383,12 +385,13 @@ public class EffectImpact extends AbstractEffect {
             Vec3 predicted = nPos.add(nVel.scale(predictTicks));
             BlockPos center = BlockPos.containing(predicted);
             double horiz = Math.sqrt(nVel.x * nVel.x + nVel.z * nVel.z);
-            int radius = Math.max(3, (int) Math.ceil(horiz * 5.0));
-            int verticalBelow = 2;
-            int verticalAbove = 1;
+            int radius2 = Math.max(3, (int) Math.ceil(horiz * 5.0));
+            int verticalBelow2 = 2;
+            int verticalAbove2 = 1;
             int timeoutTicksNearby = nearbyIsFalling ? (20 * 10) : (20 * 60);
 
-            var posEvent2 = new WatchingBlockPosDelayedEvent(center, world, resolver, timeoutTicksNearby, radius, verticalBelow, verticalAbove, guard, expectedBlock);
+            var posEvent2 = new WatchingBlockPosDelayedEvent(center, radius2, verticalBelow2, verticalAbove2, expectedBlock,
+                    rayTraceResult, world, resolver, timeoutTicksNearby, guard);
             var entityEvent2 = new WatchingEntityBlockDelayedEvent(nearby, rayTraceResult, world, resolver, timeoutTicksNearby, guard);
 
             spellContext.delay(posEvent2);
@@ -411,8 +414,6 @@ public class EffectImpact extends AbstractEffect {
             LOGGER.warn("EffectImpact: resolver.resume(world) threw exception (entity not mage-like): {}", t.toString());
         }
     }
-
-
 
     @Nonnull
     @Override
