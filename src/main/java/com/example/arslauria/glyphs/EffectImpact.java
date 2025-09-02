@@ -2,6 +2,7 @@ package com.example.arslauria.glyphs;
 
 import com.example.arslauria.Lauria;
 import com.example.arslauria.glyphs.events.WatchingBlockPosDelayedEvent;
+import com.example.arslauria.glyphs.events.WatchingDelayedSpellEvent;
 import com.example.arslauria.glyphs.events.WatchingEntityBlockDelayedEvent;
 import com.hollingsworth.arsnouveau.api.event.EventQueue;
 import com.hollingsworth.arsnouveau.api.spell.AbstractAugment;
@@ -20,6 +21,7 @@ import net.minecraft.world.entity.item.FallingBlockEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.*;
 import net.minecraft.world.phys.AABB;
 import org.apache.logging.log4j.LogManager;
@@ -30,11 +32,18 @@ import javax.annotation.Nonnull;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * EffectImpact — эффект, который ищет рядом "mage block" (enchanted_mage_block / FallingBlockEntity)
- * и ждёт, пока он "приземлится" или исчезнет, затем резолвит спелл. Дополнительно поддерживает
- * отложение по BlockPos для падающих блоков и логов (BlockTags.LOGS).
+ * и ждёт, пока он "приземлится" или исчезнет, затем резолвит спелл.
+ *
+ * Эта версия:
+ * - прогнозирует место приземления падающего блока и создаёт WatchingBlockPosDelayedEvent с радиусом;
+ * - создаёт совместно WatchingEntityBlockDelayedEvent и WatchingBlockPosDelayedEvent с общим AtomicBoolean guard,
+ *   чтобы resume(world) был вызван ровно один раз;
+ * - передаёт expectedBlock в WatchingBlockPosDelayedEvent (если может быть получен из FallingBlockEntity),
+ *   чтобы не резолвить на случайные листья/растительность.
  */
 public class EffectImpact extends AbstractEffect {
 
@@ -56,7 +65,6 @@ public class EffectImpact extends AbstractEffect {
      */
     private boolean looksLikeMageBlock(Entity e) {
         if (e == null) return false;
-        // Проверяем реестрный тип сущности (строка), а также конкретный класс для падающих блоков
         String typeStr = e.getType() != null ? e.getType().toString().toLowerCase() : "";
         if (typeStr.contains("mage_block")
                 || typeStr.contains("enchanted_mage_block")
@@ -64,7 +72,6 @@ public class EffectImpact extends AbstractEffect {
                 || typeStr.contains("falling")) {
             return true;
         }
-        // Подстраховка по классу
         if (e instanceof FallingBlockEntity) {
             return true;
         }
@@ -104,6 +111,55 @@ public class EffectImpact extends AbstractEffect {
             if (candidate != null) {
                 LOGGER.info("EffectImpact: Found candidate entity of type {} at {} (isRemoved={})",
                         candidate.getType(), candidate.blockPosition(), candidate.isRemoved());
+
+                // Если это падающий блок из инвентаря — используем комбинированный подход (pos + entity) с guard
+                String typeStr = candidate.getType() != null ? candidate.getType().toString().toLowerCase() : "";
+                boolean isEnchantedFalling = typeStr.contains("enchanted_falling_block") || (candidate instanceof FallingBlockEntity);
+
+                if (isEnchantedFalling) {
+                    LOGGER.info("EffectImpact: candidate looks like enchanted/falling block -> creating combined watchers for entity {}", candidate.blockPosition());
+                    AtomicBoolean guard = new AtomicBoolean(false);
+
+                    // попытка извлечь ожидаемый блок из FallingBlockEntity
+                    Block expectedBlock = null;
+                    if (candidate instanceof FallingBlockEntity fbe) {
+                        try {
+                            expectedBlock = fbe.getBlockState().getBlock();
+                        } catch (Throwable ignored) { expectedBlock = null; }
+                    }
+
+                    // прогнозируем позицию через N тиков (эвристика)
+                    Vec3 entityPos = candidate.position();
+                    Vec3 vel = candidate.getDeltaMovement() != null ? candidate.getDeltaMovement() : Vec3.ZERO;
+                    double predictTicks = 10.0; // можно варьировать
+                    Vec3 predicted = entityPos.add(vel.scale(predictTicks));
+                    BlockPos center = BlockPos.containing(predicted);
+
+                    double horizSpeed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
+                    int radiusInt = Math.max(3, (int) Math.ceil(horizSpeed * 5.0)); // минимальный радиус 3
+                    int verticalBelow = 2;
+                    int verticalAbove = 1;
+                    int timeoutTicks = 20 * 10; // 10 секунд
+
+                    LOGGER.info("EffectImpact: predicted landing center {} from pos {} vel={} -> radius={} (predTicks={}) expectedBlock={}",
+                            center, entityPos, vel, radiusInt, predictTicks, expectedBlock != null ? expectedBlock.toString() : "null");
+
+                    var posEvent = new WatchingBlockPosDelayedEvent(center, world, resolver, timeoutTicks, radiusInt, verticalBelow, verticalAbove, guard, expectedBlock);
+                    var entityEvent = new WatchingEntityBlockDelayedEvent(candidate, rayTraceResult, world, resolver, timeoutTicks, guard);
+
+                    spellContext.delay(posEvent);
+                    spellContext.delay(entityEvent);
+                    LOGGER.info("EffectImpact: delayed combined events (pos + entity) for {} (currentIndex={})", center, spellContext.getCurrentIndex());
+
+                    if (!world.isClientSide()) {
+                        EventQueue.getServerInstance().addEvent(posEvent);
+                        EventQueue.getServerInstance().addEvent(entityEvent);
+                        LOGGER.info("EffectImpact: added combined events to EventQueue for pos {} and entity {}", center, candidate.blockPosition());
+                    }
+                    return;
+                }
+
+                // Оригинальная логика для enchanted_mage_block и других mage-like сущностей
                 if (candidate.isRemoved()) {
                     LOGGER.info("EffectImpact: candidate already removed -> calling resolver.resume(world) immediately for pos {}", candidate.blockPosition());
                     try {
@@ -167,13 +223,63 @@ public class EffectImpact extends AbstractEffect {
                                 SpellStats spellStats, SpellContext spellContext, SpellResolver resolver) {
 
         String spellInfo = spellContext.getSpell() != null ? spellContext.getSpell().toString() : "null";
-        String entityInfo = rayTraceResult.getEntity() != null ? rayTraceResult.getEntity().getType().toString() : "null";
+        String entityInfo = rayTraceResult != null && rayTraceResult.getEntity() != null ? rayTraceResult.getEntity().getType().toString() : "null";
         LOGGER.info("EffectImpact.onResolveEntity called. serverSide={}, entity={}, currentIndex={}, spell={}",
                 !world.isClientSide(), entityInfo, spellContext.getCurrentIndex(), spellInfo);
 
-        Entity hit = rayTraceResult.getEntity();
-        if (looksLikeMageBlock(hit)) {
-            LOGGER.info("EffectImpact: Hit entity looks like mage block: {}, isRemoved={}", hit.getType(), hit.isRemoved());
+        Entity hit = rayTraceResult != null ? rayTraceResult.getEntity() : null;
+        if (hit == null) {
+            LOGGER.info("EffectImpact: onResolveEntity: hit entity == null -> immediate resume");
+            try {
+                resolver.resume(world);
+            } catch (Throwable t) {
+                LOGGER.warn("EffectImpact: resolver.resume(world) threw when hit==null: {}", t.toString());
+            }
+            return;
+        }
+
+        String typeStr = hit.getType() != null ? hit.getType().toString().toLowerCase() : "";
+        boolean looksLikeMage = looksLikeMageBlock(hit);
+        boolean isFalling = typeStr.contains("enchanted_falling_block") || (hit instanceof FallingBlockEntity);
+        boolean isMageBlock = typeStr.contains("mage_block") || typeStr.contains("enchanted_mage_block");
+
+        LOGGER.info("EffectImpact: hit entity typeStr='{}', looksLikeMage={}, isFalling={}, isMageBlock={}",
+                typeStr, looksLikeMage, isFalling, isMageBlock);
+
+        // --------- Special-case: real mage_block (non-falling) ---------------
+        // Для enchanted_mage_block (классический mage block) используем простую
+        // и надёжную логику: WatchingDelayedSpellEvent (ваш WatchingDelayedSpellEvent),
+        // которая реагирует на удаление сущности / появление блока под ней / низкую скорость и т.д.
+        if (isMageBlock && !isFalling) {
+            LOGGER.info("EffectImpact: Handling mage_block (non-falling) with WatchingDelayedSpellEvent at pos {}", hit.blockPosition());
+
+            if (hit.isRemoved()) {
+                LOGGER.info("EffectImpact: mage_block already removed -> immediate resume for pos {}", hit.blockPosition());
+                try {
+                    resolver.resume(world);
+                } catch (Throwable t) {
+                    LOGGER.warn("EffectImpact: resolver.resume(world) threw for removed mage_block: {}", t.toString());
+                }
+                return;
+            }
+
+            int timeoutTicks = 20 * 30; // 30 seconds — можно увеличить/уменьшить при необходимости
+            var event = new WatchingDelayedSpellEvent(hit, rayTraceResult, world, resolver, timeoutTicks);
+
+            spellContext.delay(event);
+            LOGGER.info("EffectImpact: delayed WatchingDelayedSpellEvent for mage_block at {} (currentIndex={})", hit.blockPosition(), spellContext.getCurrentIndex());
+
+            if (!world.isClientSide()) {
+                EventQueue.getServerInstance().addEvent(event);
+                LOGGER.info("EffectImpact: added WatchingDelayedSpellEvent to EventQueue for mage_block at {}", hit.blockPosition());
+            }
+            return;
+        }
+
+        // --------- General mage-like / falling handling (combined watchers) ------------
+        if (looksLikeMage) {
+            LOGGER.info("EffectImpact: Hit entity looks like mage-like (fallback combined watchers): {}, isRemoved={}", hit.getType(), hit.isRemoved());
+
             if (hit.isRemoved()) {
                 LOGGER.info("EffectImpact: hit entity already removed -> calling resolver.resume(world) immediately for pos {}", hit.blockPosition());
                 try {
@@ -185,50 +291,118 @@ public class EffectImpact extends AbstractEffect {
                 return;
             }
 
-            int timeoutTicks = 20 * 60; // 60s default
-            var event = new WatchingEntityBlockDelayedEvent(hit, rayTraceResult, world, resolver, timeoutTicks);
+            // Для падающих блоков и других mage-like создаём COMBINED watchers (pos + entity) с guard
+            java.util.concurrent.atomic.AtomicBoolean guard = new java.util.concurrent.atomic.AtomicBoolean(false);
 
-            LOGGER.info("EffectImpact: about to delay event for hit entity at {} (currentIndex={})", hit.blockPosition(), spellContext.getCurrentIndex());
-            spellContext.delay(event);
-            LOGGER.info("EffectImpact: delayed event for hit entity at {} (currentIndex={})", hit.blockPosition(), spellContext.getCurrentIndex());
+            // попытка извлечь expectedBlock (только применимо к FallingBlockEntity)
+            Block expectedBlock = null;
+            if (hit instanceof FallingBlockEntity fbe) {
+                try {
+                    expectedBlock = fbe.getBlockState().getBlock();
+                } catch (Throwable ignored) { expectedBlock = null; }
+            }
+
+            Vec3 entityPos = hit.position();
+            Vec3 vel = hit.getDeltaMovement() != null ? hit.getDeltaMovement() : Vec3.ZERO;
+            double predictTicks = 10.0;
+            Vec3 predicted = entityPos.add(vel.scale(predictTicks));
+            BlockPos center = BlockPos.containing(predicted);
+
+            double horizSpeed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
+            int radius = Math.max(3, (int) Math.ceil(horizSpeed * 5.0));
+            int verticalBelow = 2;
+            int verticalAbove = 1;
+
+            int timeoutTicks = isFalling ? (20 * 10) : (20 * 60);
+
+            LOGGER.info("EffectImpact: predicted landing center {} from pos {} vel={} -> radius={} (predTicks={}) expectedBlock={}",
+                    center, entityPos, vel, radius, predictTicks, expectedBlock != null ? expectedBlock.toString() : "null");
+
+            var posEvent = new WatchingBlockPosDelayedEvent(center, world, resolver, timeoutTicks, radius, verticalBelow, verticalAbove, guard, expectedBlock);
+            var entityEvent = new WatchingEntityBlockDelayedEvent(hit, rayTraceResult, world, resolver, timeoutTicks, guard);
+
+            spellContext.delay(posEvent);
+            spellContext.delay(entityEvent);
+            LOGGER.info("EffectImpact: delayed BlockPos & Entity events for {} (currentIndex={})", center, spellContext.getCurrentIndex());
 
             if (!world.isClientSide()) {
-                EventQueue.getServerInstance().addEvent(event);
-                LOGGER.info("EffectImpact: added event to EventQueue for hit entity pos {}", hit.blockPosition());
+                EventQueue.getServerInstance().addEvent(posEvent);
+                EventQueue.getServerInstance().addEvent(entityEvent);
+                LOGGER.info("EffectImpact: added BlockPos & Entity events to EventQueue for {} and {}", center, hit.blockPosition());
             }
             return;
         }
 
-        // Если не mage-like — попробуем найти nearby mage-like entity в радиусе 12 (как раньше)
+        // --------- Not mage-like: fallback to searching nearby mage-like entity ----------
         Vec3 hitVec = rayTraceResult.getLocation();
         Entity nearby = findNearbyMageLikeEntity(world, hitVec, 12.0);
         LOGGER.debug("EffectImpact: Nearby search for mage-like entity returned: {}", nearby != null ? nearby.getType().toString() + "@" + nearby.blockPosition() : "null");
         if (nearby != null) {
             LOGGER.info("EffectImpact: Found nearby entity {} at {} (isRemoved={})", nearby.getType(), nearby.blockPosition(), nearby.isRemoved());
-            if (nearby.isRemoved()) {
-                LOGGER.info("EffectImpact: nearby entity already removed -> calling resolver.resume(world) for pos {}", nearby.blockPosition());
-                try {
-                    resolver.resume(world);
-                    LOGGER.info("EffectImpact: resolver.resume(world) called successfully for nearby removed entity at {}", nearby.blockPosition());
-                } catch (Throwable t) {
-                    LOGGER.warn("EffectImpact: resolver.resume(world) threw exception for nearby removed entity: {}", t.toString());
+
+            // If nearby is a mage_block (non-falling), use the mage-specific simple watcher
+            String nearbyTypeStr = nearby.getType() != null ? nearby.getType().toString().toLowerCase() : "";
+            boolean nearbyIsFalling = nearbyTypeStr.contains("enchanted_falling_block") || (nearby instanceof FallingBlockEntity);
+            boolean nearbyIsMageBlock = nearbyTypeStr.contains("mage_block") || nearbyTypeStr.contains("enchanted_mage_block");
+
+            if (nearbyIsMageBlock && !nearbyIsFalling) {
+                LOGGER.info("EffectImpact: nearby is mage_block (non-falling) -> using WatchingDelayedSpellEvent for {}", nearby.blockPosition());
+                if (nearby.isRemoved()) {
+                    LOGGER.info("EffectImpact: nearby mage_block already removed -> resolver.resume(world)");
+                    try {
+                        resolver.resume(world);
+                    } catch (Throwable t) {
+                        LOGGER.warn("EffectImpact: resolver.resume(world) threw for nearby removed mage_block: {}", t.toString());
+                    }
+                    return;
+                }
+                int timeoutTicks = 20 * 30;
+                var event = new WatchingDelayedSpellEvent(nearby, rayTraceResult, world, resolver, timeoutTicks);
+                spellContext.delay(event);
+                if (!world.isClientSide()) {
+                    EventQueue.getServerInstance().addEvent(event);
+                    LOGGER.info("EffectImpact: added WatchingDelayedSpellEvent to EventQueue for nearby mage_block at {}", nearby.blockPosition());
                 }
                 return;
             }
-            int timeoutTicks = 20 * 60;
-            var event = new WatchingEntityBlockDelayedEvent(nearby, rayTraceResult, world, resolver, timeoutTicks);
 
-            LOGGER.info("EffectImpact: about to delay event for nearby entity at {} (currentIndex={})", nearby.blockPosition(), spellContext.getCurrentIndex());
-            spellContext.delay(event);
-            LOGGER.info("EffectImpact: delayed event for nearby entity at {} (currentIndex={})", nearby.blockPosition(), spellContext.getCurrentIndex());
+            // otherwise use combined watchers for nearby falling or mage-like entities
+            LOGGER.info("EffectImpact: nearby is mage-like/falling -> creating combined watchers");
+            java.util.concurrent.atomic.AtomicBoolean guard = new java.util.concurrent.atomic.AtomicBoolean(false);
+
+            Block expectedBlock = null;
+            if (nearby instanceof FallingBlockEntity fbeNearby) {
+                try {
+                    expectedBlock = fbeNearby.getBlockState().getBlock();
+                } catch (Throwable ignored) { expectedBlock = null; }
+            }
+
+            Vec3 nPos = nearby.position();
+            Vec3 nVel = nearby.getDeltaMovement() != null ? nearby.getDeltaMovement() : Vec3.ZERO;
+            double predictTicks = 10.0;
+            Vec3 predicted = nPos.add(nVel.scale(predictTicks));
+            BlockPos center = BlockPos.containing(predicted);
+            double horiz = Math.sqrt(nVel.x * nVel.x + nVel.z * nVel.z);
+            int radius = Math.max(3, (int) Math.ceil(horiz * 5.0));
+            int verticalBelow = 2;
+            int verticalAbove = 1;
+            int timeoutTicksNearby = nearbyIsFalling ? (20 * 10) : (20 * 60);
+
+            var posEvent2 = new WatchingBlockPosDelayedEvent(center, world, resolver, timeoutTicksNearby, radius, verticalBelow, verticalAbove, guard, expectedBlock);
+            var entityEvent2 = new WatchingEntityBlockDelayedEvent(nearby, rayTraceResult, world, resolver, timeoutTicksNearby, guard);
+
+            spellContext.delay(posEvent2);
+            spellContext.delay(entityEvent2);
 
             if (!world.isClientSide()) {
-                EventQueue.getServerInstance().addEvent(event);
-                LOGGER.info("EffectImpact: added event to EventQueue for nearby entity pos {}", nearby.blockPosition());
+                EventQueue.getServerInstance().addEvent(posEvent2);
+                EventQueue.getServerInstance().addEvent(entityEvent2);
+                LOGGER.info("EffectImpact: added BlockPos & Entity events to EventQueue for {} and {}", center, nearby.blockPosition());
             }
             return;
         }
 
+        // Not mage-like anywhere — resume immediately
         LOGGER.info("EffectImpact: Entity hit is not mage-like -> resolving immediately.");
         try {
             resolver.resume(world);
@@ -237,6 +411,8 @@ public class EffectImpact extends AbstractEffect {
             LOGGER.warn("EffectImpact: resolver.resume(world) threw exception (entity not mage-like): {}", t.toString());
         }
     }
+
+
 
     @Nonnull
     @Override
