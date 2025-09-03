@@ -75,6 +75,7 @@ public class Lauria
     private void setup(final FMLCommonSetupEvent event)
     {
         ArsNouveauRegistry.registerSounds();
+        ArsNouveauRegistry.addAugments();
         NetworkHandler.init();
 /*
         // Делаем изменение конфигов в рабочем потоке загрузки (после инициализации модов)

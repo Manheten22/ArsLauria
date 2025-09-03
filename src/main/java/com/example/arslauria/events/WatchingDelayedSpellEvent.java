@@ -1,4 +1,4 @@
-package com.example.arslauria.glyphs.events;
+package com.example.arslauria.events;
 
 import com.hollingsworth.arsnouveau.api.event.DelayedSpellEvent;
 import com.hollingsworth.arsnouveau.api.spell.SpellResolver;

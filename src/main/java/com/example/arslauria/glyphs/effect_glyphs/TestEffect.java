@@ -1,4 +1,4 @@
-package com.example.arslauria.glyphs;
+package com.example.arslauria.glyphs.effect_glyphs;
 
 import com.hollingsworth.arsnouveau.api.spell.*;
 import com.hollingsworth.arsnouveau.common.spell.augment.AugmentAmplify;

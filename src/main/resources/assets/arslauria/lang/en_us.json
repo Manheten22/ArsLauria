@@ -11,5 +11,14 @@
     "arslauria.glyph_desc.glyph_barrier": "Creates a protective barrier capable of absorbing damage (stacks, diminishing returns).",
 
     "arslauria.glyph_name.glyph_impact": "Impact",
-    "arslauria.glyph_desc.glyph_impact": ""
+    "arslauria.glyph_desc.glyph_impact": "Delays the spell until the target transitions from creature to block.",
+
+    "arslauria.glyph_name.glyph_extendtime_minor": "Extend Time Minor",
+    "arslauria.glyph_desc.glyph_extendtime_minor": "Extends time for 0.1 sec",
+
+    "arslauria.glyph_name.glyph_extendtime_lesser": "Extend Time Lesser",
+    "arslauria.glyph_desc.glyph_extendtime_lesser": "Extends time for 0.25 sec",
+
+  "arslauria.glyph_name.glyph_extendtime_half": "Extend Time Half",
+  "arslauria.glyph_desc.glyph_extendtime_half": "Extends time for 0.5 sec"
 }

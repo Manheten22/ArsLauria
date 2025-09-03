@@ -1,4 +1,4 @@
-package com.example.arslauria.glyphs;
+package com.example.arslauria.glyphs.effect_glyphs;
 
 import com.example.arslauria.effects.BarrierEffect;
 import com.example.arslauria.setup.ModEffects;
@@ -9,22 +9,20 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.HitResult;
 import net.minecraftforge.common.ForgeConfigSpec;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
 import org.jetbrains.annotations.NotNull;
 
-import javax.annotation.Nonnull;
 import java.util.Set;
 
 import static com.example.arslauria.Lauria.prefix;
 
-public class Barrier extends AbstractEffect {
+public class EffectBarrier extends AbstractEffect {
 
-    public static Barrier INSTANCE =
-            new Barrier(prefix("glyph_barrier"), "Barrier");
+    public static EffectBarrier INSTANCE =
+            new EffectBarrier(prefix("glyph_barrier"), "Barrier");
 
     public static final int BASE_DURATION = 10 * 20; // 10 секунд
 
-    public Barrier(ResourceLocation tag, String description) {
+    public EffectBarrier(ResourceLocation tag, String description) {
         super(tag, description);
     }
 

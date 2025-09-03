@@ -1,4 +1,4 @@
-package com.example.arslauria.glyphs.events;
+package com.example.arslauria.events;
 
 import com.hollingsworth.arsnouveau.api.event.DelayedSpellEvent;
 import com.hollingsworth.arsnouveau.api.spell.SpellResolver;
@@ -33,6 +33,12 @@ public class WatchingBlockPosDelayedEvent extends DelayedSpellEvent {
     // delays
     private static final int RESOLVE_DELAY_TICKS = 0; // тики до первого вызова resolveSpell (оставьте 0 если вы вызываете scheduleResolveNextTickAndForceTick со своим duration)
     private static final int RESUME_DELAY_TICKS = 10; // 10 тиков перед фактическим resolver.resume(world)
+    private static final int PASSIVE_POS_DELAY_WITH_GUARD_TICKS = 6;
+
+
+    private int tickCounter = 0;
+    private int lastSkipLogTick = -9999;
+    private BlockPos lastSkipPos = null;
 
     // guard для координации с другими похожими событиями
     private final AtomicBoolean guard; // may be null
@@ -73,6 +79,7 @@ public class WatchingBlockPosDelayedEvent extends DelayedSpellEvent {
         this(center, radius, vBelow, vAbove, expectedBlock, initialHit, world, resolver, timeoutTicks, null);
     }
 
+
     @Override
     public void tick(boolean serverSide) {
         if (manuallyResolved || world == null) return;
@@ -82,21 +89,43 @@ public class WatchingBlockPosDelayedEvent extends DelayedSpellEvent {
             return;
         }
 
+        // локальный счётчик тиков (для rate-limit логов)
+        tickCounter++;
+
+        // Если guard уже установлен — это значит, что связанный entityEvent уже резолвнул спелл.
+        // В этом случае нам нужно аккуратно выйти и пометить событие как выполненное.
+        if (guard != null && guard.get()) {
+            LOGGER.debug("WatchingBlockPosDelayedEvent: guard set -> expiring posEvent for center {}", center);
+            manuallyResolved = true;
+            duration = 0;
+            return;
+        }
+
         try {
             // Обычная проверка: ищем блок в радиусе center
             BlockPos found = scanForBlockNearCenter();
             if (found != null) {
-                LOGGER.info("WatchingBlockPosDelayedEvent: block detected near {} -> {} (expected={})", center, found, expectedBlock);
-                scheduleResolveWithDelay(found);
+                if (!resolvedScheduled) {
+                    LOGGER.info("WatchingBlockPosDelayedEvent: block detected near {} -> {} (expected={})", center, found, expectedBlock);
+                    scheduleResolveWithDelay(found);
+                } else {
+                    // rate-limit логов — не логируем более чем раз в 20 тиков для одной и той же позиции
+                    int now = tickCounter;
+                    if (lastSkipPos == null || !lastSkipPos.equals(found) || now - lastSkipLogTick > 20) {
+                        LOGGER.debug("WatchingBlockPosDelayedEvent: block detected near {} -> {} but resolve already scheduled -> skip", center, found);
+                        lastSkipLogTick = now;
+                        lastSkipPos = found;
+                    }
+                }
                 return;
             }
+
         } catch (Throwable t) {
             LOGGER.warn("WatchingBlockPosDelayedEvent tick exception: {}", t.toString());
         }
 
         super.tick(serverSide);
     }
-
     private BlockPos scanForBlockNearCenter() {
         if (center == null || world == null) return null;
         for (int dx = -radius; dx <= radius; dx++) {
@@ -125,15 +154,25 @@ public class WatchingBlockPosDelayedEvent extends DelayedSpellEvent {
                 LOGGER.debug("scheduleResolveWithDelay: already scheduled or manuallyResolved -> skip");
                 return;
             }
-            // поставим первую задержку (если хотите использовать её) — иначе duration уже может быть установлено извне
-            this.duration = Math.max(1, RESOLVE_DELAY_TICKS);
+
+            // Если guard != null — это часть combined-watchers: дадим posEvent большую начальную задержку,
+            // чтобы entityEvent (который использует RESOLVE_DELAY_TICKS=10) мог обнаружить и резолвнуть первым.
+            if (guard != null) {
+                // делаем задержку, превышающую полный expected-latency у entityEvent (10 + 10)
+                this.duration = Math.max(1, PASSIVE_POS_DELAY_WITH_GUARD_TICKS);
+                LOGGER.info("WatchingBlockPosDelayedEvent: guard present -> scheduling passive delay {} ticks for pos {}", this.duration, usePos);
+            } else {
+                // стандартное поведение (быстрый резолв)
+                this.duration = Math.max(1, RESOLVE_DELAY_TICKS);
+                LOGGER.info("WatchingBlockPosDelayedEvent: resolve scheduled (duration set to {}). Will call resolveSpell() soon. deferredUsePos={}", this.duration, usePos);
+            }
+
             resolvedScheduled = true;
-            // Сохраним позицию (будет выяснена точнее в resolveSpell)
             deferredUsePos = usePos;
-            LOGGER.info("WatchingBlockPosDelayedEvent: resolve scheduled (duration set to {}). Will call resolveSpell() soon. deferredUsePos={}", this.duration, usePos);
         }
-        // не вызываем super.tick(true) — позволяем естественному таймеру дойти
+        // не форсим super.tick(true) — позволяем таймеру истечь естественно
     }
+
 
     @Override
     public void resolveSpell() {

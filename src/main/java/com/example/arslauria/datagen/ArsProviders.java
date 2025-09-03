@@ -2,7 +2,7 @@ package com.example.arslauria.datagen;
 
 import com.example.arslauria.ArsNouveauRegistry;
 import com.example.arslauria.Lauria;
-import com.example.arslauria.glyphs.TestEffect;
+import com.example.arslauria.glyphs.effect_glyphs.TestEffect;
 import com.hollingsworth.arsnouveau.api.enchanting_apparatus.EnchantingApparatusRecipe;
 import com.hollingsworth.arsnouveau.api.familiar.AbstractFamiliarHolder;
 import com.hollingsworth.arsnouveau.api.ritual.AbstractRitual;

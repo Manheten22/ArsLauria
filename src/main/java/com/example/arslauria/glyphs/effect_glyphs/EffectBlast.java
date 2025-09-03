@@ -1,4 +1,4 @@
-package com.example.arslauria.glyphs;
+package com.example.arslauria.glyphs.effect_glyphs;
 
 import com.hollingsworth.arsnouveau.api.spell.*;
 import com.hollingsworth.arsnouveau.api.util.ANExplosion;
@@ -21,11 +21,11 @@ import java.util.Set;
 
 import static com.example.arslauria.Lauria.prefix;
 
-public class Blast extends AbstractEffect implements IDamageEffect {
+public class EffectBlast extends AbstractEffect implements IDamageEffect {
 
-    public static Blast INSTANCE = new Blast(prefix("glyph_blast"), "Blast");
+    public static EffectBlast INSTANCE = new EffectBlast(prefix("glyph_blast"), "Blast");
 
-    public Blast(ResourceLocation tag, String description) {
+    public EffectBlast(ResourceLocation tag, String description) {
         super(tag, description);
     }
 
